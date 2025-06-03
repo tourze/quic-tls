@@ -1,0 +1,28 @@
+{
+  "name": "tourze/quic-tls",
+  "description": "QUIC协议TLS1.3握手库",
+  "type": "library",
+  "license": "MIT",
+  "require": {
+    "php": "^8.1",
+    "ext-openssl": "*",
+    "tourze/quic-core": "0.0.*",
+    "tourze/quic-crypto": "0.0.*"
+  },
+  "require-dev": {
+    "phpstan/phpstan": "^2.1",
+    "phpunit/phpunit": "^10.0"
+  },
+  "autoload": {
+    "psr-4": {
+      "Tourze\\QUIC\\TLS\\": "src/"
+    }
+  },
+  "autoload-dev": {
+    "psr-4": {
+      "Tourze\\QUIC\\TLS\\Tests\\": "tests/"
+    }
+  },
+  "minimum-stability": "stable",
+  "prefer-stable": true
+}
