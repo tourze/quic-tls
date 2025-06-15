@@ -44,6 +44,8 @@ class HandshakeStateMachine
     private ?TransportParameters $localParams = null;
     private ?TransportParameters $peerParams = null;
     private ?CertificateValidator $certValidator = null;
+    private ?string $handshakeSecret = null;
+    private bool $isComplete = false;
 
     public function __construct(
         bool $isServer,
@@ -114,6 +116,11 @@ class HandshakeStateMachine
         
         // 提取传输参数
         $this->peerParams = $clientHello->getTransportParameters();
+        
+        // 派生握手密钥 (简化的密钥交换)
+        $sharedSecret = random_bytes(32); // 模拟的共享密钥
+        $transcriptHash = $this->computeTranscriptHash();
+        $this->keyScheduler->deriveHandshakeSecrets($sharedSecret, $transcriptHash);
         
         // 更新状态并生成响应
         $this->currentState = self::STATE_WAIT_CLIENT_FINISHED;
@@ -345,5 +352,17 @@ class HandshakeStateMachine
         return pack('C', $type) .
                substr(pack('N', strlen($payload)), 1) .
                $payload;
+    }
+    
+    /**
+     * 重置握手状态
+     */
+    public function reset(): void
+    {
+        $this->currentState = self::STATE_INITIAL;
+        $this->transcriptBuffer = [];
+        $this->peerParams = null;
+        $this->handshakeSecret = null;
+        $this->isComplete = false;
     }
 } 

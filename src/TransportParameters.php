@@ -37,7 +37,7 @@ class TransportParameters
      */
     private const DEFAULT_PARAMS = [
         self::PARAM_MAX_IDLE_TIMEOUT => 30000, // 30秒
-        self::PARAM_MAX_UDP_PAYLOAD_SIZE => 1472, // 标准MTU - IP/UDP头部
+        self::PARAM_MAX_UDP_PAYLOAD_SIZE => 1472, // 标准以太网MTU减去IP/UDP头
         self::PARAM_INITIAL_MAX_DATA => 1048576, // 1MB
         self::PARAM_INITIAL_MAX_STREAM_DATA_BIDI_LOCAL => 65536, // 64KB
         self::PARAM_INITIAL_MAX_STREAM_DATA_BIDI_REMOTE => 65536, // 64KB
@@ -249,6 +249,78 @@ class TransportParameters
     }
 
     /**
+     * 获取初始最大双向流数量
+     */
+    public function getInitialMaxStreamsBidi(): int
+    {
+        return $this->getParameter(self::PARAM_INITIAL_MAX_STREAMS_BIDI) ?? 0;
+    }
+
+    /**
+     * 获取初始最大单向流数量
+     */
+    public function getInitialMaxStreamsUni(): int
+    {
+        return $this->getParameter(self::PARAM_INITIAL_MAX_STREAMS_UNI) ?? 0;
+    }
+
+    /**
+     * 设置最大空闲超时
+     */
+    public function setMaxIdleTimeout(int $timeout): void
+    {
+        $this->setParameter(self::PARAM_MAX_IDLE_TIMEOUT, $timeout);
+    }
+
+    /**
+     * 设置最大UDP载荷大小
+     */
+    public function setMaxUdpPayloadSize(int $size): void
+    {
+        $this->setParameter(self::PARAM_MAX_UDP_PAYLOAD_SIZE, $size);
+    }
+
+    /**
+     * 设置初始最大数据
+     */
+    public function setInitialMaxData(int $data): void
+    {
+        $this->setParameter(self::PARAM_INITIAL_MAX_DATA, $data);
+    }
+
+    /**
+     * 设置初始最大流数据（双向本地）
+     */
+    public function setInitialMaxStreamDataBidiLocal(int $data): void
+    {
+        $this->setParameter(self::PARAM_INITIAL_MAX_STREAM_DATA_BIDI_LOCAL, $data);
+    }
+
+    /**
+     * 设置初始最大流数据（双向远程）
+     */
+    public function setInitialMaxStreamDataBidiRemote(int $data): void
+    {
+        $this->setParameter(self::PARAM_INITIAL_MAX_STREAM_DATA_BIDI_REMOTE, $data);
+    }
+
+    /**
+     * 设置初始最大双向流数量
+     */
+    public function setInitialMaxStreamsBidi(int $streams): void
+    {
+        $this->setParameter(self::PARAM_INITIAL_MAX_STREAMS_BIDI, $streams);
+    }
+
+    /**
+     * 设置初始最大单向流数量
+     */
+    public function setInitialMaxStreamsUni(int $streams): void
+    {
+        $this->setParameter(self::PARAM_INITIAL_MAX_STREAMS_UNI, $streams);
+    }
+
+    /**
      * 编码可变长度整数
      */
     private function encodeVarInt(int $value): string
@@ -318,5 +390,44 @@ class TransportParameters
         }
         
         return true;
+    }
+
+    /**
+     * 转换为数组
+     */
+    public function toArray(): array
+    {
+        return $this->parameters;
+    }
+    
+    /**
+     * 从数组创建实例
+     */
+    public static function fromArray(array $data): self
+    {
+        $instance = new self();
+        
+        foreach ($data as $paramId => $value) {
+            if (is_string($paramId)) {
+                // 如果 paramId 是字符串，尝试转换为对应的常量值
+                $paramId = match ($paramId) {
+                    'max_idle_timeout' => self::PARAM_MAX_IDLE_TIMEOUT,
+                    'max_udp_payload_size' => self::PARAM_MAX_UDP_PAYLOAD_SIZE,
+                    'initial_max_data' => self::PARAM_INITIAL_MAX_DATA,
+                    'initial_max_stream_data_bidi_local' => self::PARAM_INITIAL_MAX_STREAM_DATA_BIDI_LOCAL,
+                    'initial_max_stream_data_bidi_remote' => self::PARAM_INITIAL_MAX_STREAM_DATA_BIDI_REMOTE,
+                    'initial_max_stream_data_uni' => self::PARAM_INITIAL_MAX_STREAM_DATA_UNI,
+                    'initial_max_streams_bidi' => self::PARAM_INITIAL_MAX_STREAMS_BIDI,
+                    'initial_max_streams_uni' => self::PARAM_INITIAL_MAX_STREAMS_UNI,
+                    'ack_delay_exponent' => self::PARAM_ACK_DELAY_EXPONENT,
+                    'max_ack_delay' => self::PARAM_MAX_ACK_DELAY,
+                    'active_connection_id_limit' => self::PARAM_ACTIVE_CONNECTION_ID_LIMIT,
+                    default => (int) $paramId,
+                };
+            }
+            $instance->setParameter($paramId, $value);
+        }
+        
+        return $instance;
     }
 } 

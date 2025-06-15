@@ -218,4 +218,20 @@ class ServerHello
     {
         $this->cipherSuite = $suite;
     }
+    
+    /**
+     * 设置随机数
+     */
+    public function setRandom(string $random): void
+    {
+        $this->random = $random;
+    }
+    
+    /**
+     * 设置扩展
+     */
+    public function setExtensions(array $extensions): void
+    {
+        $this->extensions = $extensions;
+    }
 }

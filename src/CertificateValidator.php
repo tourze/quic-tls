@@ -18,16 +18,26 @@ class CertificateValidator
     private ?string $caCertificate = null;
     private array $trustedCAs = [];
     private bool $verifyPeer = true;
+    private bool $verifyPeerName = true;
     private bool $allowSelfSigned = false;
-    private int $verifyDepth = 9;
+    private int $verifyDepth = 7;
+    private bool $disableCompression = true;
+    private string $caFile = '';
+    private bool $checkRevocation = false;
+    private string $privateKey = '';
 
     public function __construct(array $options = [])
     {
         $this->serverCertificate = $options['server_cert'] ?? null;
         $this->caCertificate = $options['ca_cert'] ?? null;
         $this->verifyPeer = $options['verify_peer'] ?? true;
+        $this->verifyPeerName = $options['verify_peer_name'] ?? true;
         $this->allowSelfSigned = $options['allow_self_signed'] ?? false;
-        $this->verifyDepth = $options['verify_depth'] ?? 9;
+        $this->verifyDepth = $options['verify_depth'] ?? 7;
+        $this->disableCompression = $options['disable_compression'] ?? true;
+        $this->caFile = $options['ca_file'] ?? $this->loadSystemCACertificates();
+        $this->checkRevocation = $options['check_revocation'] ?? false;
+        $this->privateKey = $options['private_key'] ?? '';
         
         if (isset($options['server_key'])) {
             $this->serverPrivateKey = openssl_pkey_get_private($options['server_key']);
@@ -37,6 +47,22 @@ class CertificateValidator
         }
         
         $this->loadSystemCAs();
+    }
+    
+    /**
+     * 获取配置
+     */
+    public function getConfig(): array
+    {
+        return [
+            'verify_peer' => $this->verifyPeer,
+            'verify_peer_name' => $this->verifyPeerName,
+            'allow_self_signed' => $this->allowSelfSigned,
+            'verify_depth' => $this->verifyDepth,
+            'disable_compression' => $this->disableCompression,
+            'ca_file' => $this->caFile,
+            'check_revocation' => $this->checkRevocation,
+        ];
     }
 
     /**
@@ -81,9 +107,14 @@ class CertificateValidator
             return false;
         }
 
-        // 如果只有一个证书且允许自签名
-        if ($chainLength === 1 && $this->allowSelfSigned) {
-            return $this->verifySelfSignedCertificate($certificateChain[0]);
+        // 如果只有一个证书
+        if ($chainLength === 1) {
+            if ($this->allowSelfSigned) {
+                return $this->verifySelfSignedCertificate($certificateChain[0]);
+            } else {
+                // 不允许自签名证书，单个证书被认为是自签名的
+                return false;
+            }
         }
 
         // 验证链中每个证书
@@ -241,9 +272,16 @@ class CertificateValidator
     /**
      * 设置服务器证书
      */
-    public function setServerCertificate(string $certificate): void
+    public function setServerCertificate(string $certificate, string $privateKey = ''): void
     {
         $this->serverCertificate = $certificate;
+        if ($privateKey) {
+            $this->privateKey = $privateKey;
+            $this->serverPrivateKey = openssl_pkey_get_private($privateKey);
+            if ($this->serverPrivateKey === false) {
+                throw new \InvalidArgumentException('无效的私钥');
+            }
+        }
     }
 
     /**
@@ -308,7 +346,7 @@ class CertificateValidator
     /**
      * 验证证书链的完整性
      */
-    public function validateCertificateChain(array $certificateChain, string $hostname = null): bool
+    public function validateCertificateChain(array $certificateChain, ?string $hostname = null): bool
     {
         if (!$this->validateCertificate($certificateChain)) {
             return false;
@@ -382,6 +420,17 @@ class CertificateValidator
             throw new \InvalidArgumentException('无法解析证书');
         }
 
+        // 添加额外的字段以满足测试需求
+        if (isset($info['validFrom_time_t'])) {
+            $info['valid_from'] = date('Y-m-d H:i:s', $info['validFrom_time_t']);
+        }
+        if (isset($info['validTo_time_t'])) {
+            $info['valid_to'] = date('Y-m-d H:i:s', $info['validTo_time_t']);
+        }
+        if (isset($info['serialNumber'])) {
+            $info['serial_number'] = $info['serialNumber'];
+        }
+
         return $info;
     }
 
@@ -394,4 +443,116 @@ class CertificateValidator
         // 简化实现，总是返回false
         return false;
     }
+    
+    /**
+     * 加载系统 CA 证书
+     */
+    public function loadSystemCACertificates(): string
+    {
+        // 尝试常见的 CA 证书路径
+        $commonPaths = [
+            '/etc/ssl/certs/ca-certificates.crt',
+            '/etc/pki/tls/certs/ca-bundle.crt',
+            '/usr/share/ssl/certs/ca-bundle.crt',
+            '/usr/local/share/certs/ca-root-nss.crt',
+            '/etc/ssl/cert.pem'
+        ];
+        
+        foreach ($commonPaths as $path) {
+            if (file_exists($path)) {
+                return $path;
+            }
+        }
+        
+        return '';
+    }
+    
+    /**
+     * 获取证书指纹
+     */
+    public function getCertificateFingerprint(string $certificate): string
+    {
+        $x509 = openssl_x509_read($certificate);
+        if ($x509 === false) {
+            throw new \InvalidArgumentException('无法解析证书');
+        }
+        
+        openssl_x509_export($x509, $pem);
+        return hash('sha256', $pem);
+    }
+    
+    /**
+     * 主机名验证
+     */
+    public function verifyHostname(string $certificate, string $hostname): bool
+    {
+        if (!$this->verifyPeerName) {
+            return true;
+        }
+        
+        $info = $this->getCertificateInfo($certificate);
+        
+        // 检查 CN
+        if (isset($info['subject']['CN']) && $this->matchHostname($info['subject']['CN'], $hostname)) {
+            return true;
+        }
+        
+        // 检查 SAN
+        if (isset($info['extensions']['subjectAltName'])) {
+            $sans = explode(', ', $info['extensions']['subjectAltName']);
+            foreach ($sans as $san) {
+                if (strpos($san, 'DNS:') === 0) {
+                    $dnsName = substr($san, 4);
+                    if ($this->matchHostname($dnsName, $hostname)) {
+                        return true;
+                    }
+                }
+            }
+        }
+        
+        return false;
+    }
+    
+    /**
+     * 通配符匹配
+     */
+    public function matchesWildcard(string $hostname, string $pattern): bool
+    {
+        return $this->matchHostname($pattern, $hostname);
+    }
+    
+    /**
+     * 签名数据
+     */
+    public function signData(string $data, string $privateKey): string
+    {
+        $key = openssl_pkey_get_private($privateKey);
+        if ($key === false) {
+            throw new \InvalidArgumentException('无效的私钥');
+        }
+        
+        $signature = '';
+        $result = openssl_sign($data, $signature, $key, OPENSSL_ALGO_SHA256);
+        
+        if (!$result) {
+            throw new \RuntimeException('签名失败');
+        }
+        
+        return $signature;
+    }
+    
+    /**
+     * 验证签名
+     */
+    public function verifySignature(string $data, string $signature, string $certificate): bool
+    {
+        $publicKey = openssl_pkey_get_public($certificate);
+        if ($publicKey === false) {
+            return false;
+        }
+        
+        $result = openssl_verify($data, $signature, $publicKey, OPENSSL_ALGO_SHA256);
+        return $result === 1;
+    }
+    
 } 

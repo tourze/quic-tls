@@ -175,4 +175,12 @@ class Certificate
     {
         return $this->certificateRequestContext;
     }
+    
+    /**
+     * 设置证书列表
+     */
+    public function setCertificates(array $certificates): void
+    {
+        $this->certificateList = $certificates;
+    }
 } 

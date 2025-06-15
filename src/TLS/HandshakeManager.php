@@ -1,353 +1,438 @@
 <?php
 
-namespace Tourze\Workerman\QUIC\TLS;
+declare(strict_types=1);
 
-use Tourze\Workerman\QUIC\Service\QUICProtocol;
+namespace Tourze\QUIC\TLS\TLS;
 
+use Tourze\QUIC\TLS\CertificateValidator;
+use Tourze\QUIC\TLS\HandshakeStateMachine;
+use Tourze\QUIC\TLS\KeyScheduler;
+use Tourze\QUIC\TLS\TransportParameters;
+
+/**
+ * TLS 握手管理器
+ * 
+ * 管理 TLS 握手的高级操作和状态协调
+ */
 class HandshakeManager
 {
-    /**
-     * 转录哈希缓冲区
-     * @var array
-     */
-    private $_transcriptBuffer = [];
-
-    /**
-     * 私钥
-     * @var OpenSSLAsymmetricKey|null
-     */
-    private $_privateKey = null;
-
-    /**
-     * 证书
-     * @var string|null
-     */
-    private $_certificate = null;
-
-    /**
-     * 密钥
-     * @var array
-     */
-    private $_keys = [
-        'client_handshake' => null,
-        'server_handshake' => null,
-        'client_application' => null,
-        'server_application' => null
-    ];
-
-    /**
-     * 加密套件
-     * @var int
-     */
-    private $_cipherSuite = QUICProtocol::TLS_AES_128_GCM_SHA256;
-
-    public function __construct(?string $privateKey = null, ?string $certificate = null)
-    {
-        if ($privateKey) {
-            $this->_privateKey = openssl_pkey_get_private($privateKey);
-        }
-        if ($certificate) {
-            $this->_certificate = $certificate;
-        }
+    private HandshakeStateMachine $stateMachine;
+    private CryptoManager $cryptoManager;
+    private MessageHandler $messageHandler;
+    private KeyScheduler $keyScheduler;
+    
+    private bool $isServer;
+    private ?TransportParameters $localParams = null;
+    private ?TransportParameters $peerParams = null;
+    private ?CertificateValidator $certValidator = null;
+    
+    // 握手消息缓冲区
+    private array $pendingMessages = [];
+    private string $transcriptBuffer = '';
+    private array $receivedMessages = [];
+    
+    // 握手密钥
+    private ?string $handshakeSecret = null;
+    private ?string $masterSecret = null;
+    
+    // 会话恢复
+    private ?string $psk = null;
+    private ?string $pskIdentity = null;
+    
+    public function __construct(
+        bool $isServer,
+        ?TransportParameters $localParams = null,
+        ?CertificateValidator $certValidator = null
+    ) {
+        $this->isServer = $isServer;
+        $this->localParams = $localParams ?? new TransportParameters();
+        $this->certValidator = $certValidator ?? new CertificateValidator();
+        
+        $this->stateMachine = new HandshakeStateMachine($isServer, $this->localParams, $this->certValidator);
+        $this->cryptoManager = new CryptoManager($isServer);
+        $this->messageHandler = new MessageHandler();
+        $this->keyScheduler = new KeyScheduler();
     }
-
+    
     /**
-     * 生成 Client Hello
+     * 开始握手过程
+     * 
+     * @return string 初始握手消息（客户端返回 ClientHello）
      */
-    public function generateClientHello(): string
+    public function startHandshake(): string
     {
-        $data = '';
-        
-        // 协议版本 (TLS 1.3)
-        $data .= pack('n', 0x0304);
-        
-        // 随机数 (32 字节)
-        $data .= random_bytes(32);
-        
-        // Session ID
-        $data .= chr(32) . random_bytes(32);
-        
-        // 密码套件列表
-        $cipherSuites = [
-            QUICProtocol::TLS_AES_128_GCM_SHA256,
-            QUICProtocol::TLS_AES_256_GCM_SHA384,
-            QUICProtocol::TLS_CHACHA20_POLY1305_SHA256
-        ];
-        $data .= pack('n', count($cipherSuites) * 2);
-        foreach ($cipherSuites as $suite) {
-            $data .= pack('n', $suite);
+        if (!$this->localParams) {
+            throw new \RuntimeException('传输参数未设置');
         }
         
-        // 压缩方法 (null)
-        $data .= chr(1) . chr(0);
-        
-        // 扩展
-        $extensions = $this->generateClientExtensions();
-        $data .= pack('n', strlen($extensions)) . $extensions;
-
-        return $this->wrapHandshakeMessage(0x01, $data);
-    }
-
-    /**
-     * 生成 Server Hello
-     */
-    public function generateServerHello(): string
-    {
-        $data = '';
-        
-        // 协议版本 (TLS 1.3)
-        $data .= pack('n', 0x0304);
-        
-        // 随机数 (32 字节)
-        $data .= random_bytes(32);
-        
-        // Session ID
-        $data .= chr(32) . random_bytes(32);
-        
-        // 选择的密码套件
-        $data .= pack('n', $this->_cipherSuite);
-        
-        // 压缩方法 (null)
-        $data .= chr(0);
-        
-        // 扩展
-        $extensions = $this->generateServerExtensions();
-        $data .= pack('n', strlen($extensions)) . $extensions;
-        
-        return $this->wrapHandshakeMessage(0x02, $data);
-    }
-
-    /**
-     * 生成证书验证
-     */
-    public function generateCertificateVerify(): string
-    {
-        if (!$this->_privateKey) {
-            return '';
+        if (!$this->isServer) {
+            return $this->stateMachine->startClientHandshake();
         }
         
-        $data = str_repeat(chr(0x20), 64);
-        $data .= "TLS 1.3, server CertificateVerify";
-        $data .= chr(0);
-        
-        $data .= $this->computeTranscriptHash(0x0b);
-        
-        openssl_sign($data, $signature, $this->_privateKey, OPENSSL_ALGO_SHA256);
-        
-        $verifyData = pack('n', 0x0403); // ecdsa_secp256r1_sha256
-        $verifyData .= pack('n', strlen($signature)) . $signature;
-        
-        return $this->wrapHandshakeMessage(0x0f, $verifyData);
+        // 服务器等待 ClientHello
+        return '';
     }
-
+    
     /**
-     * 生成完成消息
+     * 处理接收到的握手数据
+     * 
+     * @param string $data 接收到的握手数据
+     * @param string $encryptionLevel 加密级别
+     * @return array 包含响应数据和新的加密级别
      */
-    public function generateFinished(): string
+    public function processHandshakeData(string $data, string $encryptionLevel): array
     {
-        return $this->wrapHandshakeMessage(0x14, $this->computeVerifyData());
-    }
-
-    /**
-     * 计算转录哈希
-     * @param int $upToType
-     * @return string
-     */
-    public function computeTranscriptHash(int $upToType): string
-    {
-        $context = hash_init('sha256');
+        $responses = [];
+        $newLevel = $encryptionLevel;
         
-        foreach ($this->_transcriptBuffer as $message) {
-            if ($message['type'] > $upToType) {
-                break;
+        // 解析握手消息
+        $messages = $this->messageHandler->parseHandshakeData($data);
+        
+        foreach ($messages as $message) {
+            // 根据加密级别解密消息（如果需要）
+            if ($encryptionLevel !== 'initial') {
+                $message['data'] = $this->cryptoManager->decrypt(
+                    $message['data'],
+                    $encryptionLevel,
+                    $this->buildAssociatedData($message['type'])
+                );
             }
             
-            $data = chr($message['type']) . 
-                    pack('N', strlen($message['data']))[1] . 
-                    pack('n', strlen($message['data'])) . 
-                    $message['data'];
+            // 处理消息并获取响应
+            $response = $this->stateMachine->processMessage($message['data']);
             
-            hash_update($context, $data);
+            if ($response) {
+                // 检查是否需要切换加密级别
+                $newLevel = $this->determineEncryptionLevel($message['type']);
+                
+                // 加密响应（如果需要）
+                if ($newLevel !== 'initial') {
+                    $response = $this->cryptoManager->encrypt(
+                        $response,
+                        $newLevel,
+                        $this->buildAssociatedData(0) // 响应类型
+                    );
+                }
+                
+                $responses[] = [
+                    'data' => $response,
+                    'level' => $newLevel,
+                ];
+            }
+            
+            // 更新密钥（如果需要）
+            $this->updateKeysIfNeeded($message['type']);
         }
         
-        return hash_final($context, true);
+        return [
+            'responses' => $responses,
+            'newLevel' => $newLevel,
+            'isComplete' => $this->stateMachine->isComplete(),
+        ];
     }
-
+    
     /**
-     * 计算验证数据
-     * @return string
+     * 根据消息类型确定加密级别
      */
-    public function computeVerifyData(): string
+    private function determineEncryptionLevel(int $messageType): string
     {
-        $key = $this->_keys['client_handshake'] ?? $this->_keys['server_handshake'];
-        if (!$key) {
-            throw new \Exception('Handshake key not available');
+        return match ($messageType) {
+            HandshakeStateMachine::MSG_CLIENT_HELLO,
+            HandshakeStateMachine::MSG_SERVER_HELLO => 'initial',
+            
+            HandshakeStateMachine::MSG_ENCRYPTED_EXTENSIONS,
+            HandshakeStateMachine::MSG_CERTIFICATE,
+            HandshakeStateMachine::MSG_CERTIFICATE_VERIFY,
+            HandshakeStateMachine::MSG_FINISHED => 'handshake',
+            
+            default => 'application',
+        };
+    }
+    
+    /**
+     * 根据握手进度更新密钥
+     */
+    private function updateKeysIfNeeded(int $messageType): void
+    {
+        switch ($messageType) {
+            case HandshakeStateMachine::MSG_SERVER_HELLO:
+                // 派生握手密钥
+                $this->deriveHandshakeSecrets();
+                break;
+                
+            case HandshakeStateMachine::MSG_FINISHED:
+                // 派生应用密钥
+                $this->deriveApplicationSecrets();
+                break;
+        }
+    }
+    
+    /**
+     * 派生握手密钥
+     */
+    private function deriveHandshakeSecrets(): void
+    {
+        // 从状态机获取共享密钥（这里简化处理）
+        $sharedSecret = random_bytes(32); // 实际应该从 ECDHE 计算
+        
+        // 使用 KeyScheduler 派生密钥
+        $this->keyScheduler->setEarlySecret($this->psk ?? '');
+        $transcriptHash = hash('sha256', $this->transcriptBuffer, true);
+        $this->keyScheduler->deriveHandshakeSecrets($sharedSecret, $transcriptHash);
+        
+        // 设置到 CryptoManager
+        $this->cryptoManager->setHandshakeSecrets(
+            $this->keyScheduler->getHandshakeKey(false), // client
+            $this->keyScheduler->getHandshakeKey(true)   // server
+        );
+        
+        $this->handshakeSecret = $this->keyScheduler->getHandshakeKey(true);
+    }
+    
+    /**
+     * 派生应用密钥
+     */
+    private function deriveApplicationSecrets(): void
+    {
+        if (!$this->handshakeSecret) {
+            throw new \RuntimeException("握手密钥未设置");
         }
         
-        $transcriptHash = $this->computeTranscriptHash(0x0f);
-        $finishedKey = hash_hmac('sha256', 'tls13 finished', $key, true);
+        // 派生主密钥
+        $this->masterSecret = $this->keyScheduler->deriveMasterSecret();
         
-        return hash_hmac('sha256', $transcriptHash, $finishedKey, true);
+        // 派生应用流量密钥
+        $transcriptHash = $this->getTranscriptHash();
+        $this->keyScheduler->deriveApplicationSecrets($transcriptHash);
+        
+        // 设置到 CryptoManager
+        $this->cryptoManager->setApplicationSecrets(
+            $this->keyScheduler->getApplicationKey(false), // client
+            $this->keyScheduler->getApplicationKey(true)   // server
+        );
     }
-
+    
     /**
-     * 包装握手消息
+     * 构建关联数据（用于 AEAD）
      */
-    private function wrapHandshakeMessage(int $type, string $data): string
+    private function buildAssociatedData(int $messageType): string
     {
-        $this->_transcriptBuffer[] = [
-            'type' => $type,
-            'data' => $data
+        // 简化实现，实际应该包含更多信息
+        return pack('C', $messageType);
+    }
+    
+    /**
+     * 获取转录哈希
+     */
+    public function getTranscriptHash(): string
+    {
+        // 从状态机获取
+        return hash('sha256', $this->transcriptBuffer, true);
+    }
+    
+    /**
+     * 获取协商的传输参数
+     */
+    public function getNegotiatedParameters(): ?TransportParameters
+    {
+        return $this->stateMachine->getNegotiatedParameters();
+    }
+    
+    /**
+     * 获取当前加密级别
+     */
+    public function getCurrentEncryptionLevel(): string
+    {
+        return $this->cryptoManager->getCurrentLevel();
+    }
+    
+    /**
+     * 检查握手是否完成
+     */
+    public function isHandshakeComplete(): bool
+    {
+        return $this->stateMachine->isComplete();
+    }
+    
+    /**
+     * 设置 PSK（预共享密钥）用于 0-RTT
+     */
+    public function setPSK(string $psk, string $identity): void
+    {
+        $this->psk = $psk;
+        $this->pskIdentity = $identity;
+        $this->keyScheduler->setEarlySecret($psk);
+    }
+    
+    /**
+     * 导出密钥材料
+     * 支持两种调用方式：
+     * - exportKeyingMaterial($label, $length) 
+     * - exportKeyingMaterial($label, $context, $length)
+     */
+    public function exportKeyingMaterial(string $label, $arg2 = null, ?int $length = null): string
+    {
+        if (!$this->masterSecret) {
+            throw new \RuntimeException("主密钥未设置");
+        }
+        
+        // 根据参数个数确定调用方式
+        if ($length === null) {
+            // 两个参数：exportKeyingMaterial($label, $length)
+            $actualLength = (int)$arg2;
+            $context = $this->getTranscriptHash();
+        } else {
+            // 三个参数：exportKeyingMaterial($label, $context, $length)
+            $context = (string)$arg2;
+            $actualLength = $length;
+        }
+        
+        return $this->keyScheduler->exportKeyingMaterial(
+            $this->masterSecret,
+            $label,
+            $context,
+            $actualLength
+        );
+    }
+    
+    /**
+     * 更新流量密钥
+     */
+    public function updateTrafficKeys(): void
+    {
+        $this->cryptoManager->updateKeys();
+    }
+    
+    /**
+     * 获取会话票据（用于会话恢复）
+     */
+    public function getSessionTicket(): ?string
+    {
+        if (!$this->masterSecret) {
+            return null;
+        }
+        
+        // 创建会话票据
+        $ticket = [
+            'version' => 0x0304, // TLS 1.3
+            'cipher_suite' => $this->cryptoManager->getCipherInfo()['name'] ?? '',
+            'master_secret' => base64_encode($this->masterSecret),
+            'timestamp' => time(),
+            'lifetime' => 7200, // 2 小时
         ];
         
-        return chr($type) . pack('N', strlen($data))[1] . pack('n', strlen($data)) . $data;
+        return base64_encode(serialize($ticket));
     }
-
+    
     /**
-     * 生成客户端扩展
+     * 恢复会话
      */
-    private function generateClientExtensions(): string
+    public function resumeSession(string $ticket): bool
     {
-        $extensions = '';
-
-        // supported_versions
-        $versions = pack('n*', 0x0304); // TLS 1.3
-        $extensions .= pack('n', 0x002b) . pack('n', strlen($versions) + 1) . chr(strlen($versions)) . $versions;
-
-        // supported_groups
-        $groups = pack('n*', 0x0017, 0x0018); // secp256r1, secp384r1
-        $extensions .= pack('n', 0x000a) . pack('n', strlen($groups) + 2) . pack('n', strlen($groups)) . $groups;
-
-        // signature_algorithms
-        $sigAlgs = pack('n*', 0x0403, 0x0503, 0x0804);
-        $extensions .= pack('n', 0x000d) . pack('n', strlen($sigAlgs) + 2) . pack('n', strlen($sigAlgs)) . $sigAlgs;
-
-        // key_share
-        $keyShare = $this->generateKeyShare();
-        $extensions .= pack('n', 0x0033) . pack('n', strlen($keyShare)) . $keyShare;
-
-        // quic_transport_parameters
-        $quicParams = $this->generateQuicTransportParameters();
-        $extensions .= pack('n', 0xffa5) . pack('n', strlen($quicParams)) . $quicParams;
-
-        return $extensions;
-    }
-
-    /**
-     * 生成服务端扩展
-     */
-    private function generateServerExtensions(): string
-    {
-        $extensions = '';
-
-        // supported_versions
-        $extensions .= pack('n', 0x002b) . pack('n', 2) . pack('n', 0x0304);
-
-        // key_share
-        $keyShare = $this->generateKeyShare();
-        $extensions .= pack('n', 0x0033) . pack('n', strlen($keyShare)) . $keyShare;
-
-        // quic_transport_parameters
-        $quicParams = $this->generateQuicTransportParameters();
-        $extensions .= pack('n', 0xffa5) . pack('n', strlen($quicParams)) . $quicParams;
-
-        return $extensions;
-    }
-
-    /**
-     * 生成密钥共享
-     */
-    private function generateKeyShare(): string
-    {
-        $keyPair = openssl_pkey_new([
-            'curve_name' => 'prime256v1',
-            'private_key_type' => OPENSSL_KEYTYPE_EC
-        ]);
-        
-        $details = openssl_pkey_get_details($keyPair);
-        $publicKey = $details['key'];
-        
-        return pack('n', 0x0017) . pack('n', strlen($publicKey)) . $publicKey;
-    }
-
-    /**
-     * 生成 QUIC 传输参数
-     */
-    private function generateQuicTransportParameters(): string
-    {
-        $params = '';
-        
-        // initial_max_stream_data_bidi_local
-        $params .= pack('n', 0x0005) . pack('n', 4) . pack('N', 256 * 1024);
-        
-        // initial_max_data
-        $params .= pack('n', 0x0004) . pack('n', 4) . pack('N', 1024 * 1024);
-        
-        // initial_max_streams_bidi
-        $params .= pack('n', 0x0008) . pack('n', 2) . pack('n', 100);
-        
-        // idle_timeout
-        $params .= pack('n', 0x0001) . pack('n', 2) . pack('n', 30);
-        
-        return $params;
-    }
-
-    public function getCipherSuite(): int
-    {
-        return $this->_cipherSuite;
-    }
-
-    public function setCipherSuite(int $suite): void
-    {
-        $this->_cipherSuite = $suite;
-    }
-
-    public function setKey(string $type, string $key): void
-    {
-        if (isset($this->_keys[$type])) {
-            $this->_keys[$type] = $key;
+        try {
+            $data = unserialize(base64_decode($ticket));
+            
+            if ($data['version'] !== 0x0304 || time() - $data['timestamp'] > $data['lifetime']) {
+                return false;
+            }
+            
+            $this->masterSecret = base64_decode($data['master_secret']);
+            $this->setPSK($this->masterSecret, $ticket);
+            
+            return true;
+        } catch (\Exception $e) {
+            return false;
         }
     }
-
-    public function getKey(string $type): ?string
-    {
-        return $this->_keys[$type] ?? null;
-    }
-
+    
     /**
-     * 生成加密扩展
-     * @return string
+     * 获取调试信息
      */
-    public function generateEncryptedExtensions(): string
+    public function getDebugInfo(): array
     {
-        $extensions = '';
-        
-        // quic_transport_parameters
-        $quicParams = $this->generateQuicTransportParameters();
-        $extensions .= pack('n', 0xffa5) . pack('n', strlen($quicParams)) . $quicParams;
-        
-        return $this->wrapHandshakeMessage(0x08, pack('n', strlen($extensions)) . $extensions);
+        return [
+            'state' => $this->stateMachine->getCurrentState(),
+            'is_server' => $this->isServer,
+            'encryption_level' => $this->cryptoManager->getCurrentLevel(),
+            'handshake_complete' => $this->stateMachine->isComplete(),
+            'has_psk' => $this->psk !== null,
+            'negotiated_params' => $this->getNegotiatedParameters()?->toArray(),
+        ];
     }
-
+    
     /**
-     * 生成证书
-     * @return string
+     * 获取统计信息
      */
-    public function generateCertificate(): string
+    public function getStatistics(): array
     {
-        if (!$this->_certificate) {
-            return '';
+        return [
+            'messages_processed' => count($this->receivedMessages),
+            'bytes_processed' => strlen($this->transcriptBuffer),
+            'current_state' => $this->stateMachine->getCurrentState(),
+            'handshake_complete' => $this->stateMachine->isComplete(),
+            'encryption_level' => $this->cryptoManager->getCurrentLevel(),
+            'pending_messages' => count($this->pendingMessages),
+        ];
+    }
+    
+    /**
+     * 更新密钥
+     */
+    public function updateKeys(): void
+    {
+        $this->updateTrafficKeys();
+    }
+    
+    /**
+     * 重置握手状态
+     */
+    public function reset(): void
+    {
+        $this->stateMachine->reset();
+        $this->pendingMessages = [];
+        $this->receivedMessages = [];
+        $this->transcriptBuffer = '';
+        $this->handshakeSecret = null;
+        $this->masterSecret = null;
+        $this->psk = null;
+        $this->pskIdentity = null;
+    }
+    
+    /**
+     * 设置 PSK（简化版本，单参数）
+     */
+    public function setPSKSimple(string $psk): void
+    {
+        $this->setPSK($psk, '');
+    }
+    
+    
+    
+    /**
+     * 处理消息（简化签名）
+     */
+    public function processMessage(string $message): array
+    {
+        try {
+            return $this->processHandshakeData($message, 'initial');
+        } catch (\Exception $e) {
+            return ['error' => $e->getMessage()];
         }
-        
-        $certData = '';
-        $certData .= chr(0); // 证书请求上下文长度为 0
-        
-        $certList = '';
-        $certList .= pack('N', strlen($this->_certificate))[1] . pack('n', strlen($this->_certificate)) . $this->_certificate;
-        $certList .= pack('n', 0); // 没有扩展
-        
-        $certData .= pack('N', strlen($certList))[1] . pack('n', strlen($certList)) . $certList;
-        
-        return $this->wrapHandshakeMessage(0x0b, $certData);
+    }
+    
+    /**
+     * 设置传输参数
+     */
+    public function setTransportParameters(TransportParameters $params): void
+    {
+        $this->localParams = $params;
+    }
+    
+    /**
+     * 设置证书验证器
+     */
+    public function setCertificateValidator(CertificateValidator $validator): void
+    {
+        $this->certValidator = $validator;
     }
 } 

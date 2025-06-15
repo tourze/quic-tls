@@ -341,4 +341,28 @@ class ClientHello
     {
         return $this->extensions[$type] ?? null;
     }
+    
+    /**
+     * 设置随机数
+     */
+    public function setRandom(string $random): void
+    {
+        $this->random = $random;
+    }
+    
+    /**
+     * 设置密码套件
+     */
+    public function setCipherSuites(array $cipherSuites): void
+    {
+        $this->cipherSuites = $cipherSuites;
+    }
+    
+    /**
+     * 设置扩展
+     */
+    public function setExtensions(array $extensions): void
+    {
+        $this->extensions = $extensions;
+    }
 } 
