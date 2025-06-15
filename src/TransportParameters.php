@@ -51,7 +51,7 @@ class TransportParameters
 
     public function __construct(array $parameters = [])
     {
-        $this->parameters = array_merge(self::DEFAULT_PARAMS, $parameters);
+        $this->parameters = self::DEFAULT_PARAMS + $parameters;
     }
 
     /**

@@ -262,6 +262,15 @@ class CertificateValidator
     }
 
     /**
+     * 检查是否需要证书验证
+     */
+    public function requiresCertificate(): bool
+    {
+        // 如果禁用了对等验证或允许自签名证书，就不需要完整的证书验证
+        return $this->verifyPeer && !$this->allowSelfSigned;
+    }
+
+    /**
      * 获取服务器证书
      */
     public function getServerCertificate(): ?string

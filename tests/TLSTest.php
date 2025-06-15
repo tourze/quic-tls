@@ -158,25 +158,35 @@ class TLSTest extends TestCase
     
     public function test_decrypt_withApplicationData_decryptsCorrectly(): void
     {
-        // 首先设置参数并开始握手
+        // 创建客户端和服务器TLS实例
+        $client = new TLS(false); // 客户端
+        $server = new TLS(true);  // 服务器
+        
+        // 设置参数
         $params = new TransportParameters();
-        $this->tls->setTransportParameters($params);
-        $this->tls->startHandshake();
-
-        // 手动设置为已建立状态以便测试加密功能
-        $reflection = new \ReflectionClass($this->tls);
-        $stateProperty = $reflection->getProperty('state');
-        $stateProperty->setAccessible(true);
-        $stateProperty->setValue($this->tls, 'established');
+        $client->setTransportParameters($params);
+        $server->setTransportParameters($params);
+        
+        // 手动设置为已建立状态
+        $clientReflection = new \ReflectionClass($client);
+        $serverReflection = new \ReflectionClass($server);
+        
+        $clientStateProperty = $clientReflection->getProperty('state');
+        $clientStateProperty->setAccessible(true);
+        $clientStateProperty->setValue($client, 'established');
+        
+        $serverStateProperty = $serverReflection->getProperty('state');
+        $serverStateProperty->setAccessible(true);
+        $serverStateProperty->setValue($server, 'established');
 
         $plaintext = 'Hello TLS Application Data';
         $associatedData = 'app-ad';
 
-        // 先加密
-        $encrypted = $this->tls->encrypt($plaintext, $associatedData);
+        // 客户端加密
+        $encrypted = $client->encrypt($plaintext, $associatedData);
 
-        // 再解密
-        $decrypted = $this->tls->decrypt($encrypted, $associatedData);
+        // 服务器解密
+        $decrypted = $server->decrypt($encrypted, $associatedData);
 
         $this->assertEquals($plaintext, $decrypted);
     }
@@ -193,6 +203,16 @@ class TLSTest extends TestCase
         $stateProperty = $reflection->getProperty('state');
         $stateProperty->setAccessible(true);
         $stateProperty->setValue($this->tls, 'established');
+        
+        // 设置主密钥
+        $handshakeManagerProperty = $reflection->getProperty('handshakeManager');
+        $handshakeManagerProperty->setAccessible(true);
+        $handshakeManager = $handshakeManagerProperty->getValue($this->tls);
+        
+        $hmReflection = new \ReflectionClass($handshakeManager);
+        $masterSecretProperty = $hmReflection->getProperty('masterSecret');
+        $masterSecretProperty->setAccessible(true);
+        $masterSecretProperty->setValue($handshakeManager, random_bytes(32));
 
         $label = 'test export';
         $context = 'test context';
@@ -216,6 +236,17 @@ class TLSTest extends TestCase
         $stateProperty = $reflection->getProperty('state');
         $stateProperty->setAccessible(true);
         $stateProperty->setValue($this->tls, 'established');
+        
+        // 设置当前级别为application
+        $levelProperty = $reflection->getProperty('currentLevel');
+        $levelProperty->setAccessible(true);
+        $levelProperty->setValue($this->tls, 'application');
+        
+        // 设置CryptoManager的级别
+        $cryptoManagerProperty = $reflection->getProperty('cryptoManager');
+        $cryptoManagerProperty->setAccessible(true);
+        $cryptoManager = $cryptoManagerProperty->getValue($this->tls);
+        $cryptoManager->setCurrentLevel('application');
 
         $this->tls->updateKeys();
 

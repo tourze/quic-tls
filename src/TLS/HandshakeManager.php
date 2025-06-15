@@ -66,7 +66,9 @@ class HandshakeManager
         }
         
         if (!$this->isServer) {
-            return $this->stateMachine->startClientHandshake();
+            $handshakeMessage = $this->stateMachine->startClientHandshake();
+            // 包装成TLS记录格式
+            return $this->messageHandler->wrapRecord(22, $handshakeMessage); // 22 = handshake
         }
         
         // 服务器等待 ClientHello
@@ -114,8 +116,11 @@ class HandshakeManager
                     );
                 }
                 
+                // 包装成TLS记录格式
+                $wrappedResponse = $this->messageHandler->wrapRecord(22, $response); // 22 = handshake
+                
                 $responses[] = [
-                    'data' => $response,
+                    'data' => $wrappedResponse,
                     'level' => $newLevel,
                 ];
             }

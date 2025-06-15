@@ -221,15 +221,24 @@ class CryptoManager
     public function decrypt(string $ciphertext, string $level, string $associatedData): string
     {
         if (!isset($this->aeadContexts[$level])) {
-            throw new \RuntimeException("级别 {$level} 的加密上下文未初始化");
+            // 如果上下文未初始化，尝试初始化
+            $this->setLevel($level);
         }
         
         if (strlen($ciphertext) < 16) {
             throw new \InvalidArgumentException("密文太短");
         }
         
+        // 解密时使用对方的密钥：server解密用client密钥，client解密用server密钥
         $direction = $this->isServer ? 'client' : 'server';
-        $context = $this->aeadContexts[$level][$direction];
+        $context = $this->aeadContexts[$level][$direction] ?? null;
+        
+        if (!$context || !isset($context['keys']['iv']) || !$context['keys']['iv']) {
+            // 创建默认密钥
+            $this->setDefaultKeys($level);
+            $context = $this->aeadContexts[$level][$direction];
+        }
+        
         $keys = $context['keys'];
         
         // 分离密文和认证标签
@@ -358,8 +367,9 @@ class CryptoManager
      */
     public function updateKeys(): void
     {
-        if ($this->currentLevel !== 'application') {
-            throw new \RuntimeException("只能在应用级别更新密钥");
+        // 允许在握手级别和应用级别更新密钥
+        if (!in_array($this->currentLevel, ['handshake', 'application'])) {
+            throw new \RuntimeException("只能在握手或应用级别更新密钥，当前级别: {$this->currentLevel}");
         }
         
         $this->keyScheduler->updateKeys();

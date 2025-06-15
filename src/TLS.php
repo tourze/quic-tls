@@ -255,7 +255,11 @@ class TLS
             throw new \RuntimeException("连接未建立，无法更新密钥");
         }
         
-        $this->handshakeManager->updateTrafficKeys();
+        // 确保CryptoManager处于正确的级别
+        $this->cryptoManager->setLevel($this->currentLevel);
+        
+        // 直接更新CryptoManager的密钥，而不是通过HandshakeManager
+        $this->cryptoManager->updateKeys();
         $this->triggerCallback('keys_updated', []);
     }
     
