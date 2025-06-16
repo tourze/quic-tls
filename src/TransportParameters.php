@@ -340,11 +340,17 @@ class TransportParameters
         } elseif ($value < 0x40000000) {
             // 4 字节
             return pack('N', 0x80000000 | $value);
-        } elseif ($value < 0x4000000000000000) {
-            // 8 字节
-            return pack('J', 0xc000000000000000 | $value);
         } else {
-            throw new \InvalidArgumentException('值超出VarInt范围');
+            // 8 字节 - 使用更安全的方式处理大整数
+            if ($value >= 0x4000000000000000) {
+                throw new \InvalidArgumentException('值超出VarInt范围');
+            }
+            // 0xc000000000000000 = 13835058055282163712 (超过 PHP_INT_MAX)
+            // 需要分两步处理
+            $high = 0xc0000000;
+            $low = $value & 0xffffffff;
+            $highValue = ($value >> 32) & 0x3fffffff;
+            return pack('NN', $high | $highValue, $low);
         }
     }
 
