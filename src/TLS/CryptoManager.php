@@ -174,6 +174,11 @@ class CryptoManager
      */
     public function encrypt(string $plaintext, string $level, string $associatedData): string
     {
+        // 验证级别是否有效
+        if (!in_array($level, ['initial', 'handshake', 'application'])) {
+            throw new \RuntimeException("级别 $level 的加密上下文未初始化");
+        }
+        
         if (!isset($this->aeadContexts[$level])) {
             // 如果上下文未初始化，尝试初始化
             $this->setLevel($level);
@@ -220,6 +225,11 @@ class CryptoManager
      */
     public function decrypt(string $ciphertext, string $level, string $associatedData): string
     {
+        // 验证级别是否有效
+        if (!in_array($level, ['initial', 'handshake', 'application'])) {
+            throw new \RuntimeException("级别 $level 的加密上下文未初始化");
+        }
+        
         if (!isset($this->aeadContexts[$level])) {
             // 如果上下文未初始化，尝试初始化
             $this->setLevel($level);
@@ -367,9 +377,9 @@ class CryptoManager
      */
     public function updateKeys(): void
     {
-        // 允许在握手级别和应用级别更新密钥
-        if (!in_array($this->currentLevel, ['handshake', 'application'])) {
-            throw new \RuntimeException("只能在握手或应用级别更新密钥，当前级别: {$this->currentLevel}");
+        // 只允许在应用级别更新密钥
+        if ($this->currentLevel !== 'application') {
+            throw new \RuntimeException("只能在应用级别更新密钥");
         }
         
         $this->keyScheduler->updateKeys();

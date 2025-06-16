@@ -112,13 +112,13 @@ class TLS
         // 根据测试的期望返回结构化响应
         if ($this->isServer) {
             return [
-                'server_hello' => $initialMessage,
-                'transport_parameters' => $this->localParams->toArray(),
+                'server_hello' => $initialMessage ?: '',
+                'transport_parameters' => $this->localParams ? $this->localParams->toArray() : [],
             ];
         } else {
             return [
-                'client_hello' => $initialMessage,
-                'transport_parameters' => $this->localParams->toArray(),
+                'client_hello' => $initialMessage ?: '',
+                'transport_parameters' => $this->localParams ? $this->localParams->toArray() : [],
             ];
         }
     }
@@ -134,6 +134,12 @@ class TLS
     {
         if ($this->state === self::STATE_CLOSED) {
             throw new \RuntimeException("连接已关闭");
+        }
+        
+        // 如果服务器还在初始状态，自动开始握手
+        if ($this->isServer && $this->state === self::STATE_INITIAL) {
+            $this->state = self::STATE_HANDSHAKING;
+            $this->stats['handshake_start_time'] = microtime(true);
         }
         
         $this->stats['bytes_received'] += strlen($data);
@@ -485,9 +491,11 @@ class TLS
     public static function getSupportedCipherSuites(): array
     {
         return [
-            'TLS_AES_128_GCM_SHA256',
-            'TLS_AES_256_GCM_SHA384',
-            'TLS_CHACHA20_POLY1305_SHA256'
+            0x1301 => 'TLS_AES_128_GCM_SHA256',
+            0x1302 => 'TLS_AES_256_GCM_SHA384',
+            0x1303 => 'TLS_CHACHA20_POLY1305_SHA256',
+            // 兼容性 - 也添加 4865 (0x1301)
+            4865 => 'TLS_AES_128_GCM_SHA256'
         ];
     }
 

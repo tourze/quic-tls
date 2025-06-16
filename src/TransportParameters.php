@@ -51,7 +51,11 @@ class TransportParameters
 
     public function __construct(array $parameters = [])
     {
-        $this->parameters = self::DEFAULT_PARAMS + $parameters;
+        // 使用 + 运算符合并参数，然后覆盖提供的参数
+        $this->parameters = self::DEFAULT_PARAMS;
+        foreach ($parameters as $id => $value) {
+            $this->parameters[$id] = $value;
+        }
     }
 
     /**
@@ -277,6 +281,8 @@ class TransportParameters
      */
     public function setMaxUdpPayloadSize(int $size): void
     {
+        // QUIC 规范要求最小值为 1200
+        $size = max(1200, $size);
         $this->setParameter(self::PARAM_MAX_UDP_PAYLOAD_SIZE, $size);
     }
 
@@ -326,13 +332,19 @@ class TransportParameters
     private function encodeVarInt(int $value): string
     {
         if ($value < 0x40) {
+            // 1 字节
             return chr($value);
         } elseif ($value < 0x4000) {
+            // 2 字节
             return pack('n', 0x4000 | $value);
         } elseif ($value < 0x40000000) {
+            // 4 字节
             return pack('N', 0x80000000 | $value);
-        } else {
+        } elseif ($value < 0x4000000000000000) {
+            // 8 字节
             return pack('J', 0xc000000000000000 | $value);
+        } else {
+            throw new \InvalidArgumentException('值超出VarInt范围');
         }
     }
 

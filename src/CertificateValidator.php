@@ -70,6 +70,11 @@ class CertificateValidator
      */
     public function validateCertificate(array $certificateChain): bool
     {
+        // 如果不需要对等验证，直接返回true
+        if (!$this->verifyPeer) {
+            return true;
+        }
+
         if (empty($certificateChain)) {
             return false;
         }
@@ -85,11 +90,6 @@ class CertificateValidator
         // 检查证书有效期
         if (!$this->checkCertificateValidity($certInfo)) {
             return false;
-        }
-
-        // 如果不需要对等验证，只验证格式
-        if (!$this->verifyPeer) {
-            return true;
         }
 
         // 验证证书链
@@ -109,11 +109,17 @@ class CertificateValidator
 
         // 如果只有一个证书
         if ($chainLength === 1) {
-            if ($this->allowSelfSigned) {
-                return $this->verifySelfSignedCertificate($certificateChain[0]);
+            $cert = $certificateChain[0];
+            
+            // 先尝试验证是否是自签名证书
+            $isSelfSigned = $this->verifySelfSignedCertificate($cert);
+            
+            if ($isSelfSigned) {
+                // 是自签名证书，检查是否允许
+                return $this->allowSelfSigned;
             } else {
-                // 不允许自签名证书，单个证书被认为是自签名的
-                return false;
+                // 不是自签名证书，尝试在受信任的CA中查找
+                return $this->verifyRootCertificate($cert);
             }
         }
 
@@ -357,7 +363,84 @@ class CertificateValidator
      */
     public function validateCertificateChain(array $certificateChain, ?string $hostname = null): bool
     {
-        if (!$this->validateCertificate($certificateChain)) {
+        if (empty($certificateChain)) {
+            return false;
+        }
+
+        // 对于单个证书的情况，特殊处理
+        if (count($certificateChain) === 1) {
+            $cert = $certificateChain[0];
+            
+            // 解析证书
+            $certInfo = openssl_x509_parse($cert);
+            if ($certInfo === false) {
+                return false;
+            }
+
+            // 检查证书有效期
+            if (!$this->checkCertificateValidity($certInfo)) {
+                return false;
+            }
+
+            // 如果不需要验证对等方，则直接返回true
+            if (!$this->verifyPeer) {
+                return true;
+            }
+
+            // 如果允许自签名证书，验证它是否是自签名的
+            if ($this->allowSelfSigned) {
+                if (!$this->verifySelfSignedCertificate($cert)) {
+                    return false;
+                }
+            }
+            
+            // 验证主机名（如果提供）
+            if ($hostname !== null && !$this->validateHostname($cert, $hostname)) {
+                return false;
+            }
+            
+            return true;
+        }
+
+        // 多个证书的情况 - 检查是否有重复
+        $fingerprints = [];
+        foreach ($certificateChain as $cert) {
+            $fingerprint = openssl_x509_fingerprint($cert, 'sha256');
+            if ($fingerprint === false) {
+                return false;
+            }
+            if (in_array($fingerprint, $fingerprints)) {
+                // 发现重复的证书
+                return false;
+            }
+            $fingerprints[] = $fingerprint;
+        }
+
+        // 验证证书链中的每个证书的有效期
+        foreach ($certificateChain as $cert) {
+            $certInfo = openssl_x509_parse($cert);
+            if ($certInfo === false) {
+                return false;
+            }
+            if (!$this->checkCertificateValidity($certInfo)) {
+                return false;
+            }
+        }
+
+        // 验证证书链中的签名关系
+        $chainLength = count($certificateChain);
+        for ($i = 0; $i < $chainLength - 1; $i++) {
+            $currentCert = $certificateChain[$i];
+            $issuerCert = $certificateChain[$i + 1];
+            
+            if (!$this->verifyCertificateSignature($currentCert, $issuerCert)) {
+                return false;
+            }
+        }
+
+        // 验证根证书
+        $rootCert = $certificateChain[$chainLength - 1];
+        if (!$this->verifyRootCertificate($rootCert)) {
             return false;
         }
 

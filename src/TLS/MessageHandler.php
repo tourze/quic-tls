@@ -97,10 +97,17 @@ class MessageHandler
             }
             
             $messageType = ord($data[$offset]);
-            $messageLength = unpack('N', "\x00" . substr($data, $offset + 1, 3))[1];
+            // 读取3字节的长度字段（big-endian）
+            $lengthBytes = substr($data, $offset + 1, 3);
+            if (strlen($lengthBytes) < 3) {
+                throw new \InvalidArgumentException('握手消息长度字段不完整');
+            }
+            $messageLength = unpack('N', "\x00" . $lengthBytes)[1];
             
             if (strlen($data) - $offset - 4 < $messageLength) {
-                throw new \InvalidArgumentException('握手消息数据不完整');
+                // 添加更详细的错误信息
+                $available = strlen($data) - $offset - 4;
+                throw new \InvalidArgumentException("握手消息数据不完整: 需要 {$messageLength} 字节，但只有 {$available} 字节可用");
             }
             
             $messageData = substr($data, $offset, 4 + $messageLength);
@@ -371,14 +378,14 @@ class MessageHandler
     public function parseMessage(string $data): array
     {
         if (strlen($data) < 4) {
-            throw new \InvalidArgumentException('消息数据太短');
+            throw new \InvalidArgumentException('消息数据不完整');
         }
         
         $type = ord($data[0]);
         $length = unpack('N', "\x00" . substr($data, 1, 3))[1];
         
         if (strlen($data) < 4 + $length) {
-            throw new \InvalidArgumentException('消息长度不匹配');
+            throw new \InvalidArgumentException('消息数据不完整');
         }
         
         $body = substr($data, 4, $length);
@@ -405,7 +412,7 @@ class MessageHandler
     public function parseAlert(string $data): array
     {
         if (strlen($data) < 2) {
-            throw new \InvalidArgumentException('警告数据太短');
+            throw new \InvalidArgumentException('Alert 数据不完整');
         }
         
         return [
@@ -433,7 +440,7 @@ class MessageHandler
     public function unwrapRecord(string $data): array
     {
         if (strlen($data) < 5) {
-            throw new \InvalidArgumentException('记录数据太短');
+            throw new \InvalidArgumentException('记录数据不完整');
         }
         
         $type = ord($data[0]);
@@ -441,7 +448,7 @@ class MessageHandler
         $length = unpack('n', substr($data, 3, 2))[1];
         
         if (strlen($data) < 5 + $length) {
-            throw new \InvalidArgumentException('记录长度不匹配');
+            throw new \InvalidArgumentException('记录数据不完整');
         }
         
         $payload = substr($data, 5, $length);
@@ -449,9 +456,10 @@ class MessageHandler
         return [
             'type' => $type,
             'content_type' => $type, // 为了兼容测试
-            'version' => $version,
+            'version' => unpack('n', $version)[1], // 解包版本号
             'length' => $length,
-            'payload' => $payload
+            'payload' => $payload,
+            'data' => $payload // 为了兼容测试
         ];
     }
     

@@ -98,7 +98,9 @@ class HandshakeManagerTest extends TestCase
         $this->expectException(\RuntimeException::class);
         $this->expectExceptionMessage('传输参数未设置');
 
-        $this->handshakeManager->startHandshake();
+        // 创建一个没有传输参数的 HandshakeManager
+        $handshakeManager = new HandshakeManager(true); // isServer = true, no transport params
+        $handshakeManager->startHandshake();
     }
     
     public function test_isHandshakeComplete_returnsCorrectStatus(): void

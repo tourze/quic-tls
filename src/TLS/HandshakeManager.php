@@ -45,10 +45,10 @@ class HandshakeManager
         ?CertificateValidator $certValidator = null
     ) {
         $this->isServer = $isServer;
-        $this->localParams = $localParams ?? new TransportParameters();
+        $this->localParams = $localParams;
         $this->certValidator = $certValidator ?? new CertificateValidator();
         
-        $this->stateMachine = new HandshakeStateMachine($isServer, $this->localParams, $this->certValidator);
+        $this->stateMachine = new HandshakeStateMachine($isServer, $this->localParams ?? new TransportParameters(), $this->certValidator);
         $this->cryptoManager = new CryptoManager($isServer);
         $this->messageHandler = new MessageHandler();
         $this->keyScheduler = new KeyScheduler();

@@ -57,6 +57,7 @@ class KeyScheduler
         return match ($this->cipherSuite) {
             'TLS_AES_128_GCM_SHA256', 'TLS_CHACHA20_POLY1305_SHA256', 'sha256' => 'sha256',
             'TLS_AES_256_GCM_SHA384', 'sha384' => 'sha384',
+            'sha512' => 'sha512',
             default => 'sha256', // 默认使用 SHA256
         };
     }
@@ -99,7 +100,7 @@ class KeyScheduler
     /**
      * 派生应用密钥
      */
-    public function deriveApplicationSecrets(string $transcriptHash): void
+    public function deriveApplicationSecrets(string $transcriptHash): array
     {
         // Derive-Secret for master
         $derivedSecret = $this->deriveSecret($this->handshakeSecret, self::LABEL_TLS13_DERIVED, '');
@@ -120,6 +121,12 @@ class KeyScheduler
             self::LABEL_TLS13_SERVER_APPLICATION_TRAFFIC,
             $transcriptHash
         );
+        
+        return [
+            'client_application_traffic_secret_0' => $this->applicationKeys['client'],
+            'server_application_traffic_secret_0' => $this->applicationKeys['server'],
+            'exporter_master_secret' => $this->deriveSecret($this->masterSecret, self::LABEL_TLS13_EXPORTER_MASTER, $transcriptHash),
+        ];
     }
 
     /**
@@ -293,6 +300,20 @@ class KeyScheduler
      */
     public function setCipherSuite(string $cipherSuite): void
     {
+        // 验证密码套件是否有效
+        $validCipherSuites = [
+            'TLS_AES_128_GCM_SHA256',
+            'TLS_AES_256_GCM_SHA384',
+            'TLS_CHACHA20_POLY1305_SHA256',
+            'sha256',
+            'sha384',
+            'sha512'
+        ];
+        
+        if (!in_array($cipherSuite, $validCipherSuites, true)) {
+            throw new \ValueError("Invalid cipher suite: $cipherSuite");
+        }
+        
         $this->cipherSuite = $cipherSuite;
         $this->reset(); // 重新初始化
     }

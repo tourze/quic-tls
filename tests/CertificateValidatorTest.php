@@ -259,6 +259,7 @@ class CertificateValidatorTest extends TestCase
         // 注意：真实的 CRL 检查需要网络访问，这里只测试接口
         $validator = new CertificateValidator([
             'check_revocation' => false, // 禁用撤销检查
+            'allow_self_signed' => true, // 允许自签名证书用于测试
         ]);
 
         $certificates = [$this->testCertPem];
@@ -326,8 +327,6 @@ class CertificateValidatorTest extends TestCase
         openssl_x509_export($cert, $this->testCertPem);
         openssl_pkey_export($privateKey, $this->testPrivateKeyPem);
         
-        // 清理资源
-        openssl_x509_free($cert);
-        openssl_pkey_free($privateKey);
+        // PHP 8+ 不需要手动释放资源，资源会自动释放
     }
 }
