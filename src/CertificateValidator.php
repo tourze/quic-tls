@@ -40,15 +40,16 @@ class CertificateValidator
         $this->privateKey = $options['private_key'] ?? '';
         
         if (isset($options['server_key'])) {
-            $this->serverPrivateKey = openssl_pkey_get_private($options['server_key']);
-            if ($this->serverPrivateKey === false) {
-                throw new \InvalidArgumentException('无效的服务器私钥');
+            try {
+                $this->serverPrivateKey = openssl_pkey_get_private($options['server_key']);
+            } catch (\Throwable $e) {
+                throw new \InvalidArgumentException('无效的服务器私钥: ' . $e->getMessage(), previous: $e);
             }
         }
         
         $this->loadSystemCAs();
     }
-    
+
     /**
      * 获取配置
      */
@@ -290,11 +291,12 @@ class CertificateValidator
     public function setServerCertificate(string $certificate, string $privateKey = ''): void
     {
         $this->serverCertificate = $certificate;
-        if ($privateKey) {
+        if ($privateKey !== '') {
             $this->privateKey = $privateKey;
-            $this->serverPrivateKey = openssl_pkey_get_private($privateKey);
-            if ($this->serverPrivateKey === false) {
-                throw new \InvalidArgumentException('无效的私钥');
+            try {
+                $this->serverPrivateKey = openssl_pkey_get_private($privateKey);
+            } catch (\Throwable $e) {
+                throw new \InvalidArgumentException('无效的私钥: ' . $e->getMessage());
             }
         }
     }
@@ -304,9 +306,10 @@ class CertificateValidator
      */
     public function setServerPrivateKey(string $privateKey): void
     {
-        $this->serverPrivateKey = openssl_pkey_get_private($privateKey);
-        if ($this->serverPrivateKey === false) {
-            throw new \InvalidArgumentException('无效的私钥');
+        try {
+            $this->serverPrivateKey = openssl_pkey_get_private($privateKey);
+        } catch (\Throwable $e) {
+            throw new \InvalidArgumentException('无效的私钥: ' . $e->getMessage());
         }
     }
 
@@ -646,5 +649,4 @@ class CertificateValidator
         $result = openssl_verify($data, $signature, $publicKey, OPENSSL_ALGO_SHA256);
         return $result === 1;
     }
-    
-} 
+}
