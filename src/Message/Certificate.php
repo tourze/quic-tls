@@ -65,7 +65,9 @@ class Certificate
         // Parse Certificate List
         $listEnd = $offset + $certificateListLength;
         while ($offset < $listEnd) {
-            $certData = self::decodeCertificateEntry($data, $offset);
+            $offsetInt = (int)$offset;
+            $certData = self::decodeCertificateEntry($data, $offsetInt);
+            $offset = $offsetInt;
             if ($certData !== null) {
                 $certificate->certificateList[] = $certData;
             }
@@ -104,7 +106,7 @@ class Certificate
         
         // Certificate Data Length
         $certLength = unpack('N', "\x00" . substr($data, $offset, 3))[1];
-        $offset += 3;
+        $offset = (int)($offset + 3);
         
         if ($offset + $certLength > strlen($data)) {
             return null;
@@ -112,7 +114,7 @@ class Certificate
         
         // Certificate Data
         $certificate = substr($data, $offset, $certLength);
-        $offset += $certLength;
+        $offset = (int)($offset + $certLength);
         
         // Extensions Length
         if ($offset + 2 > strlen($data)) {
@@ -120,10 +122,10 @@ class Certificate
         }
         
         $extensionsLength = unpack('n', substr($data, $offset, 2))[1];
-        $offset += 2;
+        $offset = (int)($offset + 2);
         
         // Skip Extensions
-        $offset += $extensionsLength;
+        $offset = (int)($offset + $extensionsLength);
         
         return $certificate;
     }

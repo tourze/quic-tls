@@ -92,7 +92,7 @@ class TLS
      * 
      * @return string 初始握手消息（客户端）或空字符串（服务器）
      */
-    public function startHandshake()
+    public function startHandshake(): string
     {
         if ($this->state !== self::STATE_INITIAL) {
             throw new \RuntimeException("不能在状态 {$this->state} 下开始握手");
@@ -103,24 +103,14 @@ class TLS
         
         $initialMessage = $this->handshakeManager->startHandshake();
         
-        if ($initialMessage) {
+        if ($initialMessage !== '') {
             $this->stats['bytes_sent'] += strlen($initialMessage);
             $this->stats['messages_sent']++;
             $this->triggerCallback('message_sent', ['data' => $initialMessage, 'level' => $this->currentLevel]);
         }
         
-        // 根据测试的期望返回结构化响应
-        if ($this->isServer) {
-            return [
-                'server_hello' => $initialMessage ?: '',
-                'transport_parameters' => $this->localParams ? $this->localParams->toArray() : [],
-            ];
-        } else {
-            return [
-                'client_hello' => $initialMessage ?: '',
-                'transport_parameters' => $this->localParams ? $this->localParams->toArray() : [],
-            ];
-        }
+        // 返回初始消息字符串
+        return $initialMessage ?: '';
     }
     
     /**
@@ -431,7 +421,7 @@ class TLS
             'bytes_encrypted' => $this->stats['bytes_sent'],
             'bytes_decrypted' => $this->stats['bytes_received'],
             'cipher_suite' => $this->config['cipher_suite'] ?? 'TLS_AES_128_GCM_SHA256',
-            'transport_parameters' => $this->localParams ? $this->localParams->toArray() : []
+            'transport_parameters' => $this->localParams !== null ? $this->localParams->toArray() : []
         ]);
     }
 
@@ -493,9 +483,7 @@ class TLS
         return [
             0x1301 => 'TLS_AES_128_GCM_SHA256',
             0x1302 => 'TLS_AES_256_GCM_SHA384',
-            0x1303 => 'TLS_CHACHA20_POLY1305_SHA256',
-            // 兼容性 - 也添加 4865 (0x1301)
-            4865 => 'TLS_AES_128_GCM_SHA256'
+            0x1303 => 'TLS_CHACHA20_POLY1305_SHA256'
         ];
     }
 

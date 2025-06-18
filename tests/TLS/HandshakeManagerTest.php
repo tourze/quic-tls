@@ -55,8 +55,6 @@ class HandshakeManagerTest extends TestCase
         $tlsRecord = pack('C', 22) . pack('n', 0x0303) . pack('n', strlen($handshakeData)) . $handshakeData;
 
         $result = $this->handshakeManager->processHandshakeData($tlsRecord, 'initial');
-
-        $this->assertIsArray($result);
         $this->assertArrayHasKey('responses', $result);
         $this->assertArrayHasKey('isComplete', $result);
     }
@@ -67,9 +65,9 @@ class HandshakeManagerTest extends TestCase
         $this->handshakeManager->setTransportParameters($transportParams);
 
         $result = $this->handshakeManager->startHandshake();
-
-        $this->assertIsString($result);
         // 服务器握手开始可能返回空字符串，因为它等待客户端的 ClientHello
+        $this->assertIsString($result);
+        $this->assertEquals('', $result);
     }
     
     public function test_startHandshake_asClient_startsCorrectly(): void
@@ -88,9 +86,10 @@ class HandshakeManagerTest extends TestCase
         $clientManager->setTransportParameters($transportParams);
 
         $result = $clientManager->startHandshake();
-
-        $this->assertIsString($result);
         // 客户端握手开始应该返回 ClientHello 消息
+        $this->assertIsString($result);
+        $this->assertNotEmpty($result);
+        $this->assertGreaterThan(0, strlen($result));
     }
     
     public function test_startHandshake_withoutTransportParameters_throwsException(): void
@@ -106,8 +105,6 @@ class HandshakeManagerTest extends TestCase
     public function test_isHandshakeComplete_returnsCorrectStatus(): void
     {
         $isComplete = $this->handshakeManager->isHandshakeComplete();
-
-        $this->assertIsBool($isComplete);
         $this->assertFalse($isComplete); // 初始状态应该是未完成
     }
     
@@ -126,8 +123,6 @@ class HandshakeManagerTest extends TestCase
     public function test_getStatistics_returnsStatistics(): void
     {
         $stats = $this->handshakeManager->getStatistics();
-
-        $this->assertIsArray($stats);
         $this->assertArrayHasKey('messages_processed', $stats);
         $this->assertArrayHasKey('bytes_processed', $stats);
         $this->assertArrayHasKey('current_state', $stats);
@@ -180,8 +175,6 @@ class HandshakeManagerTest extends TestCase
         $corruptedMessage = 'corrupted message data';
 
         $result = $this->handshakeManager->processMessage($corruptedMessage);
-
-        $this->assertIsArray($result);
         $this->assertArrayHasKey('error', $result);
     }
     
@@ -203,8 +196,6 @@ class HandshakeManagerTest extends TestCase
         $this->handshakeManager->startHandshake();
 
         $transcriptHash = $this->handshakeManager->getTranscriptHash();
-
-        $this->assertIsString($transcriptHash);
         $this->assertEquals(32, strlen($transcriptHash)); // SHA256 hash length
     }
     
@@ -236,8 +227,6 @@ class HandshakeManagerTest extends TestCase
         $length = 32;
 
         $exportedKey = $this->handshakeManager->exportKeyingMaterial($label, $context, $length);
-
-        $this->assertIsString($exportedKey);
         $this->assertEquals($length, strlen($exportedKey));
     }
     
@@ -250,9 +239,6 @@ class HandshakeManagerTest extends TestCase
 
         // 第二次处理相同消息
         $result2 = $this->handshakeManager->processMessage($message);
-
-        $this->assertIsArray($result1);
-        $this->assertIsArray($result2);
 
         // 第二次处理应该被忽略或有不同的处理结果
         $this->assertTrue(true);

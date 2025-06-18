@@ -61,7 +61,7 @@ class HandshakeManager
      */
     public function startHandshake(): string
     {
-        if (!$this->localParams) {
+        if ($this->localParams === null) {
             throw new \RuntimeException('传输参数未设置');
         }
         
@@ -103,7 +103,7 @@ class HandshakeManager
             // 处理消息并获取响应
             $response = $this->stateMachine->processMessage($message['data']);
             
-            if ($response) {
+            if ($response !== '') {
                 // 检查是否需要切换加密级别
                 $newLevel = $this->determineEncryptionLevel($message['type']);
                 
@@ -199,7 +199,7 @@ class HandshakeManager
      */
     private function deriveApplicationSecrets(): void
     {
-        if (!$this->handshakeSecret) {
+        if ($this->handshakeSecret === null) {
             throw new \RuntimeException("握手密钥未设置");
         }
         
@@ -277,7 +277,7 @@ class HandshakeManager
      */
     public function exportKeyingMaterial(string $label, $arg2 = null, ?int $length = null): string
     {
-        if (!$this->masterSecret) {
+        if ($this->masterSecret === null) {
             throw new \RuntimeException("主密钥未设置");
         }
         
@@ -313,7 +313,7 @@ class HandshakeManager
      */
     public function getSessionTicket(): ?string
     {
-        if (!$this->masterSecret) {
+        if ($this->masterSecret === null) {
             return null;
         }
         

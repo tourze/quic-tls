@@ -31,8 +31,6 @@ class MessageHandlerTest extends TestCase
         $messageData = pack('C', 1) . pack('N', strlen($encodedMessage)) . $encodedMessage; // ClientHello type
 
         $parsed = $this->messageHandler->parseMessage($messageData);
-
-        $this->assertIsArray($parsed);
         $this->assertArrayHasKey('type', $parsed);
         $this->assertArrayHasKey('length', $parsed);
         $this->assertArrayHasKey('data', $parsed);
@@ -50,8 +48,6 @@ class MessageHandlerTest extends TestCase
         $messageData = pack('C', 2) . pack('N', strlen($encodedMessage)) . $encodedMessage; // ServerHello type
 
         $parsed = $this->messageHandler->parseMessage($messageData);
-
-        $this->assertIsArray($parsed);
         $this->assertArrayHasKey('type', $parsed);
         $this->assertEquals(2, $parsed['type']); // SERVER_HELLO
     }
@@ -65,8 +61,6 @@ class MessageHandlerTest extends TestCase
         $messageData = pack('C', 11) . pack('N', strlen($encodedMessage)) . $encodedMessage; // Certificate type
 
         $parsed = $this->messageHandler->parseMessage($messageData);
-
-        $this->assertIsArray($parsed);
         $this->assertEquals(11, $parsed['type']); // CERTIFICATE
     }
     
@@ -79,8 +73,6 @@ class MessageHandlerTest extends TestCase
         $messageData = pack('C', 20) . pack('N', strlen($encodedMessage)) . $encodedMessage; // Finished type
 
         $parsed = $this->messageHandler->parseMessage($messageData);
-
-        $this->assertIsArray($parsed);
         $this->assertEquals(20, $parsed['type']); // FINISHED
     }
     
@@ -109,8 +101,6 @@ class MessageHandlerTest extends TestCase
         $clientHello->setExtensions([]);
 
         $formatted = $this->messageHandler->formatMessage($clientHello); // CLIENT_HELLO
-
-        $this->assertIsArray($formatted);
         $this->assertArrayHasKey('type', $formatted);
         $this->assertArrayHasKey('data', $formatted);
         $this->assertEquals('ClientHello', $formatted['type']);
@@ -124,8 +114,6 @@ class MessageHandlerTest extends TestCase
         $serverHello->setExtensions([]);
 
         $formatted = $this->messageHandler->formatMessage($serverHello); // SERVER_HELLO
-
-        $this->assertIsArray($formatted);
         $this->assertArrayHasKey('type', $formatted);
         $this->assertEquals('ServerHello', $formatted['type']);
     }
@@ -169,8 +157,6 @@ class MessageHandlerTest extends TestCase
         $alertDescription = 10; // unexpected_message
 
         $alert = $this->messageHandler->createAlert($alertLevel, $alertDescription);
-
-        $this->assertIsString($alert);
         $this->assertNotEmpty($alert);
     }
     
@@ -179,8 +165,6 @@ class MessageHandlerTest extends TestCase
         $alertData = pack('CC', 2, 10); // fatal, unexpected_message
 
         $parsed = $this->messageHandler->parseAlert($alertData);
-
-        $this->assertIsArray($parsed);
         $this->assertArrayHasKey('level', $parsed);
         $this->assertArrayHasKey('description', $parsed);
         $this->assertEquals(2, $parsed['level']);
@@ -202,8 +186,6 @@ class MessageHandlerTest extends TestCase
         $contentType = 22; // handshake
 
         $record = $this->messageHandler->wrapRecord($contentType, $message);
-
-        $this->assertIsString($record);
         $this->assertGreaterThan(strlen($message), strlen($record)); // 包含记录头
     }
     
@@ -217,8 +199,6 @@ class MessageHandlerTest extends TestCase
 
         // 再解包
         $unwrapped = $this->messageHandler->unwrapRecord($record);
-
-        $this->assertIsArray($unwrapped);
         $this->assertArrayHasKey('content_type', $unwrapped);
         $this->assertArrayHasKey('version', $unwrapped);
         $this->assertArrayHasKey('length', $unwrapped);
@@ -264,8 +244,6 @@ class MessageHandlerTest extends TestCase
         $this->messageHandler->updateTranscript($message2);
 
         $transcript = $this->messageHandler->getTranscript();
-
-        $this->assertIsString($transcript);
         $this->assertStringContainsString($message1, $transcript);
         $this->assertStringContainsString($message2, $transcript);
     }

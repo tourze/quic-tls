@@ -333,15 +333,15 @@ class MessageHandler
             $this->encodeMessage(8, $encryptedExtensions->encode()),
         ];
         
-        if ($certificate) {
+        if ($certificate !== null) {
             $messages[] = $this->encodeMessage(11, $certificate->encode());
         }
         
-        if ($certificateVerify) {
+        if ($certificateVerify !== null) {
             $messages[] = $this->encodeMessage(15, $certificateVerify->encode());
         }
         
-        if ($finished) {
+        if ($finished !== null) {
             $messages[] = $this->encodeMessage(20, $finished->encode());
         }
         

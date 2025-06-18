@@ -386,7 +386,7 @@ class CryptoManager
         
         // 重新派生应用密钥
         $newSecrets = $this->keyScheduler->getApplicationSecrets();
-        if ($newSecrets && isset($newSecrets['client']) && isset($newSecrets['server'])) {
+        if (isset($newSecrets['client']) && isset($newSecrets['server'])) {
             $this->setApplicationSecrets($newSecrets['client'], $newSecrets['server']);
         }
     }

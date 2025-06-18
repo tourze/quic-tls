@@ -21,8 +21,6 @@ class CryptoManagerTest extends TestCase
     public function test_getCipherInfo_returnsCipherSuiteInfo(): void
     {
         $info = $this->cryptoManager->getCipherInfo();
-
-        $this->assertIsArray($info);
         $this->assertArrayHasKey('name', $info);
         $this->assertArrayHasKey('key_len', $info);
         $this->assertArrayHasKey('iv_len', $info);

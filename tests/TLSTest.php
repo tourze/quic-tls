@@ -71,9 +71,9 @@ class TLSTest extends TestCase
 
         $result = $this->tls->startHandshake();
 
-        $this->assertIsArray($result);
-        $this->assertArrayHasKey('server_hello', $result);
-        $this->assertArrayHasKey('transport_parameters', $result);
+        $this->assertIsString($result);
+        // 服务器端初始时返回空字符串，等待客户端的 ClientHello
+        $this->assertEquals('', $result);
     }
     
     public function test_startHandshake_asClient_startsCorrectly(): void
@@ -84,9 +84,11 @@ class TLSTest extends TestCase
 
         $result = $clientTLS->startHandshake();
 
-        $this->assertIsArray($result);
-        $this->assertArrayHasKey('client_hello', $result);
-        $this->assertArrayHasKey('transport_parameters', $result);
+        $this->assertIsString($result);
+        // 客户端应该返回 ClientHello 消息（非空字符串）
+        $this->assertNotEmpty($result);
+        // 验证返回的是二进制数据（TLS 记录格式）
+        $this->assertGreaterThan(0, strlen($result));
     }
     
     public function test_startHandshake_withoutParameters_throwsException(): void
