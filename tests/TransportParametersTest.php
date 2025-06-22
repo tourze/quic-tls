@@ -129,7 +129,6 @@ class TransportParametersTest extends TestCase
         
         $array = $params->toArray();
         
-        $this->assertIsArray($array);
         $this->assertArrayHasKey(TransportParameters::PARAM_MAX_IDLE_TIMEOUT, $array);
         $this->assertArrayHasKey(TransportParameters::PARAM_MAX_UDP_PAYLOAD_SIZE, $array);
         $this->assertEquals(30000, $array[TransportParameters::PARAM_MAX_IDLE_TIMEOUT]);
@@ -171,7 +170,7 @@ class TransportParametersTest extends TestCase
         $encoded = $params->encode();
         
         // 空参数应该生成有效的编码
-        $this->assertIsString($encoded);
+        $this->assertNotEmpty($encoded);
         
         $decoded = TransportParameters::decode($encoded);
         $this->assertInstanceOf(TransportParameters::class, $decoded);

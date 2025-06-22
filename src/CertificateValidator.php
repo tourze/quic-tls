@@ -15,7 +15,6 @@ class CertificateValidator
 {
     private ?string $serverCertificate = null;
     private ?OpenSSLAsymmetricKey $serverPrivateKey = null;
-    private ?string $caCertificate = null;
     private array $trustedCAs = [];
     private bool $verifyPeer = true;
     private bool $verifyPeerName = true;
@@ -24,12 +23,13 @@ class CertificateValidator
     private bool $disableCompression = true;
     private string $caFile = '';
     private bool $checkRevocation = false;
-    private string $privateKey = '';
 
     public function __construct(array $options = [])
     {
         $this->serverCertificate = $options['server_cert'] ?? null;
-        $this->caCertificate = $options['ca_cert'] ?? null;
+        if (isset($options['ca_cert'])) {
+            $this->addTrustedCA($options['ca_cert']);
+        }
         $this->verifyPeer = $options['verify_peer'] ?? true;
         $this->verifyPeerName = $options['verify_peer_name'] ?? true;
         $this->allowSelfSigned = $options['allow_self_signed'] ?? false;
@@ -37,7 +37,6 @@ class CertificateValidator
         $this->disableCompression = $options['disable_compression'] ?? true;
         $this->caFile = $options['ca_file'] ?? $this->loadSystemCACertificates();
         $this->checkRevocation = $options['check_revocation'] ?? false;
-        $this->privateKey = $options['private_key'] ?? '';
         
         if (isset($options['server_key'])) {
             try {
@@ -292,7 +291,6 @@ class CertificateValidator
     {
         $this->serverCertificate = $certificate;
         if ($privateKey !== '') {
-            $this->privateKey = $privateKey;
             try {
                 $this->serverPrivateKey = openssl_pkey_get_private($privateKey);
             } catch (\Throwable $e) {

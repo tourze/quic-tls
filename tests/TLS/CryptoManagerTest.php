@@ -11,7 +11,6 @@ use Tourze\QUIC\TLS\TLS\CryptoManager;
 class CryptoManagerTest extends TestCase
 {
     private CryptoManager $cryptoManager;
-    private KeyScheduler $keyScheduler;
     
     public function test_constructor_initializesCorrectly(): void
     {
@@ -198,7 +197,6 @@ class CryptoManagerTest extends TestCase
     
     protected function setUp(): void
     {
-        $this->keyScheduler = new KeyScheduler('sha256');
         $this->cryptoManager = new CryptoManager(true); // isServer = true
     }
 }

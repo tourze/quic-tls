@@ -6,19 +6,12 @@ namespace Tourze\QUIC\TLS\Tests\TLS;
 
 use PHPUnit\Framework\TestCase;
 use Tourze\QUIC\TLS\CertificateValidator;
-use Tourze\QUIC\TLS\HandshakeStateMachine;
-use Tourze\QUIC\TLS\KeyScheduler;
-use Tourze\QUIC\TLS\TLS\CryptoManager;
 use Tourze\QUIC\TLS\TLS\HandshakeManager;
-use Tourze\QUIC\TLS\TLS\MessageHandler;
 use Tourze\QUIC\TLS\TransportParameters;
 
 class HandshakeManagerTest extends TestCase
 {
     private HandshakeManager $handshakeManager;
-    private HandshakeStateMachine $stateMachine;
-    private CryptoManager $cryptoManager;
-    private MessageHandler $messageHandler;
     
     public function test_constructor_initializesCorrectly(): void
     {
@@ -66,7 +59,6 @@ class HandshakeManagerTest extends TestCase
 
         $result = $this->handshakeManager->startHandshake();
         // 服务器握手开始可能返回空字符串，因为它等待客户端的 ClientHello
-        $this->assertIsString($result);
         $this->assertEquals('', $result);
     }
     
@@ -87,7 +79,6 @@ class HandshakeManagerTest extends TestCase
 
         $result = $clientManager->startHandshake();
         // 客户端握手开始应该返回 ClientHello 消息
-        $this->assertIsString($result);
         $this->assertNotEmpty($result);
         $this->assertGreaterThan(0, strlen($result));
     }
@@ -246,12 +237,6 @@ class HandshakeManagerTest extends TestCase
     
     protected function setUp(): void
     {
-        $this->stateMachine = new HandshakeStateMachine(true); // isServer = true
-
-        $keyScheduler = new KeyScheduler('sha256');
-        $this->cryptoManager = new CryptoManager(true); // isServer = true
-        $this->messageHandler = new MessageHandler();
-
         $transportParams = new TransportParameters();
         $certValidator = new CertificateValidator(['allow_self_signed' => true]);
 

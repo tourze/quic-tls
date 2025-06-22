@@ -23,7 +23,6 @@ class HandshakeManager
     
     private bool $isServer;
     private ?TransportParameters $localParams = null;
-    private ?TransportParameters $peerParams = null;
     private ?CertificateValidator $certValidator = null;
     
     // 握手消息缓冲区
@@ -37,7 +36,6 @@ class HandshakeManager
     
     // 会话恢复
     private ?string $psk = null;
-    private ?string $pskIdentity = null;
     
     public function __construct(
         bool $isServer,
@@ -56,7 +54,7 @@ class HandshakeManager
     
     /**
      * 开始握手过程
-     * 
+     *
      * @return string 初始握手消息（客户端返回 ClientHello）
      */
     public function startHandshake(): string
@@ -77,7 +75,7 @@ class HandshakeManager
     
     /**
      * 处理接收到的握手数据
-     * 
+     *
      * @param string $data 接收到的握手数据
      * @param string $encryptionLevel 加密级别
      * @return array 包含响应数据和新的加密级别
@@ -265,7 +263,7 @@ class HandshakeManager
     public function setPSK(string $psk, string $identity): void
     {
         $this->psk = $psk;
-        $this->pskIdentity = $identity;
+        // PSK identity is not used in the current implementation
         $this->keyScheduler->setEarlySecret($psk);
     }
     
@@ -400,7 +398,7 @@ class HandshakeManager
         $this->handshakeSecret = null;
         $this->masterSecret = null;
         $this->psk = null;
-        $this->pskIdentity = null;
+        // PSK identity is not used in the current implementation
     }
     
     /**

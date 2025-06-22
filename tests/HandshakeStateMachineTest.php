@@ -135,7 +135,7 @@ class HandshakeStateMachineTest extends TestCase
         $clientResponse = $this->processMultipleMessages($clientStateMachine, $serverResponse);
         
         // 4. 服务器处理客户端 Finished
-        if ($clientResponse) {
+        if (!empty($clientResponse)) {
             $serverStateMachine->processMessage($clientResponse);
         }
         
@@ -284,7 +284,7 @@ class HandshakeStateMachineTest extends TestCase
         
         // 完成握手流程
         $clientResponse = $this->processMultipleMessages($clientStateMachine, $serverResponse);
-        if ($clientResponse) {
+        if (!empty($clientResponse)) {
             $serverStateMachine->processMessage($clientResponse);
         }
         
@@ -315,7 +315,7 @@ class HandshakeStateMachineTest extends TestCase
             $message = substr($data, $offset, 4 + $messageLength);
             try {
                 $result = $stateMachine->processMessage($message);
-                if ($result) {
+                if (!empty($result)) {
                     $response .= $result;
                 }
             } catch (\Exception $e) {

@@ -31,7 +31,7 @@ class MessageHandler
     
     /**
      * 解析握手数据
-     * 
+     *
      * @param string $data 原始数据
      * @return array 解析后的消息数组
      */

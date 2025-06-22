@@ -44,8 +44,6 @@ class HandshakeStateMachine
     private ?TransportParameters $localParams = null;
     private ?TransportParameters $peerParams = null;
     private ?CertificateValidator $certValidator = null;
-    private ?string $handshakeSecret = null;
-    private bool $isComplete = false;
 
     public function __construct(
         bool $isServer,
@@ -398,7 +396,5 @@ class HandshakeStateMachine
         $this->currentState = self::STATE_INITIAL;
         $this->transcriptBuffer = [];
         $this->peerParams = null;
-        $this->handshakeSecret = null;
-        $this->isComplete = false;
     }
 } 

@@ -33,10 +33,7 @@ class TLSIntegrationTest extends TestCase
         $this->assertFalse($server->isHandshakeComplete());
         
         // 开始握手
-        $clientHelloResult = $client->startHandshake();
-        $clientHello = is_array($clientHelloResult) ? 
-            ($clientHelloResult['client_hello'] ?? '') : 
-            $clientHelloResult;
+        $clientHello = $client->startHandshake();
         $this->assertNotEmpty($clientHello);
         $this->assertEquals(TLS::STATE_HANDSHAKING, $client->getState());
         
@@ -51,7 +48,7 @@ class TLSIntegrationTest extends TestCase
             $serverMessage .= $response['data'];
         }
         
-        if ($serverMessage) {
+        if (!empty($serverMessage)) {
             $clientResult = $client->processHandshakeData($serverMessage);
             
             // 处理客户端响应
@@ -61,7 +58,7 @@ class TLSIntegrationTest extends TestCase
                     $clientMessage .= $response['data'];
                 }
                 
-                if ($clientMessage) {
+                if (!empty($clientMessage)) {
                     try {
                         $server->processHandshakeData($clientMessage);
                     } catch (\InvalidArgumentException $e) {
@@ -117,44 +114,6 @@ class TLSIntegrationTest extends TestCase
         $this->assertEquals($plaintext, $decrypted);
     }
     
-    /**
-     * 执行基本握手过程
-     */
-    private function performBasicHandshake(TLS $client, TLS $server): void
-    {
-        $clientHelloResult = $client->startHandshake();
-
-        // 处理数组或字符串返回值
-        $clientHello = is_array($clientHelloResult) ?
-            ($clientHelloResult['client_hello'] ?? '') :
-            $clientHelloResult;
-
-        if ($clientHello) {
-            $serverResult = $server->processHandshakeData($clientHello);
-
-            if (!empty($serverResult['responses'])) {
-                $serverMessage = '';
-                foreach ($serverResult['responses'] as $response) {
-                    $serverMessage .= $response['data'];
-                }
-
-                if ($serverMessage) {
-                    $clientResult = $client->processHandshakeData($serverMessage);
-
-                    if (!empty($clientResult['responses'])) {
-                        $clientMessage = '';
-                        foreach ($clientResult['responses'] as $response) {
-                            $clientMessage .= $response['data'];
-                        }
-
-                        if ($clientMessage) {
-                            $server->processHandshakeData($clientMessage);
-                        }
-                    }
-                }
-            }
-        }
-    }
     
     public function testTransportParametersNegotiation(): void
     {
@@ -206,10 +165,7 @@ class TLSIntegrationTest extends TestCase
         $this->assertEquals(0, $clientStats['messages_received']);
 
         // 开始握手
-        $clientHelloResult = $client->startHandshake();
-        $clientHello = is_array($clientHelloResult) ?
-            ($clientHelloResult['client_hello'] ?? '') :
-            $clientHelloResult;
+        $clientHello = $client->startHandshake();
 
         // 检查客户端统计更新
         $clientStats = $client->getStats();
@@ -289,7 +245,6 @@ class TLSIntegrationTest extends TestCase
     {
         $support = TLS::checkSupport();
 
-        $this->assertIsArray($support);
         $this->assertArrayHasKey('openssl', $support);
         $this->assertArrayHasKey('sodium', $support);
         $this->assertArrayHasKey('tls_1_3', $support);
@@ -302,7 +257,6 @@ class TLSIntegrationTest extends TestCase
     {
         $cipherSuites = TLS::getSupportedCipherSuites();
 
-        $this->assertIsArray($cipherSuites);
         $this->assertArrayHasKey(0x1301, $cipherSuites);
         $this->assertEquals('TLS_AES_128_GCM_SHA256', $cipherSuites[0x1301]);
     }
@@ -310,7 +264,6 @@ class TLSIntegrationTest extends TestCase
     public function testVersionInfo(): void
     {
         $version = TLS::getVersion();
-        $this->assertIsString($version);
         $this->assertMatchesRegularExpression('/^\d+\.\d+\.\d+$/', $version);
     }
     
@@ -319,7 +272,6 @@ class TLSIntegrationTest extends TestCase
         $client = TLS::createClient();
         $debugInfo = $client->getDebugInfo();
 
-        $this->assertIsArray($debugInfo);
         $this->assertArrayHasKey('state', $debugInfo);
         $this->assertArrayHasKey('level', $debugInfo);
         $this->assertArrayHasKey('is_server', $debugInfo);

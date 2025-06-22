@@ -206,7 +206,6 @@ class CertificateValidatorTest extends TestCase
     {
         $info = $this->validator->getCertificateInfo($this->testCertPem);
 
-        $this->assertIsArray($info);
         $this->assertArrayHasKey('subject', $info);
         $this->assertArrayHasKey('issuer', $info);
         $this->assertArrayHasKey('valid_from', $info);
@@ -219,8 +218,6 @@ class CertificateValidatorTest extends TestCase
         $caPath = $this->validator->loadSystemCACertificates();
 
         // 应该返回一个有效的 CA 文件路径或空字符串
-        $this->assertIsString($caPath);
-
         if (!empty($caPath)) {
             $this->assertFileExists($caPath);
         }

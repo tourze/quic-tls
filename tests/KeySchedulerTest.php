@@ -145,7 +145,6 @@ class KeySchedulerTest extends TestCase
 
         $keys = $this->keyScheduler->deriveQuicKeys($secret);
 
-        $this->assertIsArray($keys);
         $this->assertArrayHasKey('key', $keys);
         $this->assertArrayHasKey('iv', $keys);
         $this->assertArrayHasKey('hp', $keys); // header protection
@@ -283,7 +282,6 @@ class KeySchedulerTest extends TestCase
 
         $earlyKeys = $this->keyScheduler->deriveEarlyDataKeys();
 
-        $this->assertIsArray($earlyKeys);
         $this->assertArrayHasKey('client_early_traffic_secret', $earlyKeys);
         $this->assertArrayHasKey('early_exporter_master_secret', $earlyKeys);
 

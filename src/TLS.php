@@ -6,7 +6,6 @@ namespace Tourze\QUIC\TLS;
 
 use Tourze\QUIC\TLS\TLS\CryptoManager;
 use Tourze\QUIC\TLS\TLS\HandshakeManager;
-use Tourze\QUIC\TLS\TLS\MessageHandler;
 
 /**
  * QUIC TLS 主入口类
@@ -29,7 +28,6 @@ class TLS
     
     private HandshakeManager $handshakeManager;
     private CryptoManager $cryptoManager;
-    private MessageHandler $messageHandler;
     
     private string $state = self::STATE_INITIAL;
     private string $currentLevel = self::LEVEL_INITIAL;
@@ -56,7 +54,7 @@ class TLS
     
     /**
      * 构造函数
-     * 
+     *
      * @param bool $isServer 是否为服务器端
      * @param array $config 配置选项
      */
@@ -74,7 +72,6 @@ class TLS
         // 初始化管理器
         $this->handshakeManager = new HandshakeManager($isServer, $this->localParams, $certValidator);
         $this->cryptoManager = new CryptoManager($isServer);
-        $this->messageHandler = new MessageHandler();
         
         // 设置 PSK（如果有）
         if (isset($this->config['psk'])) {
@@ -89,7 +86,7 @@ class TLS
     
     /**
      * 开始 TLS 握手
-     * 
+     *
      * @return string 初始握手消息（客户端）或空字符串（服务器）
      */
     public function startHandshake(): string
@@ -115,7 +112,7 @@ class TLS
     
     /**
      * 处理接收到的握手数据
-     * 
+     *
      * @param string $data 接收到的数据
      * @param string $level 加密级别
      * @return array 包含响应数据和状态信息
@@ -177,7 +174,7 @@ class TLS
     
     /**
      * 加密应用数据
-     * 
+     *
      * @param string $plaintext 明文数据
      * @param string $associatedData 关联数据
      * @return string 加密后的数据
@@ -198,7 +195,7 @@ class TLS
     
     /**
      * 解密应用数据
-     * 
+     *
      * @param string $ciphertext 密文数据
      * @param string $associatedData 关联数据
      * @return string 解密后的数据
@@ -261,7 +258,7 @@ class TLS
     
     /**
      * 导出密钥材料
-     * 
+     *
      * @param string $label 导出标签
      * @param int $length 导出长度
      * @return string 导出的密钥材料

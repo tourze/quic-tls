@@ -71,7 +71,6 @@ class TLSTest extends TestCase
 
         $result = $this->tls->startHandshake();
 
-        $this->assertIsString($result);
         // 服务器端初始时返回空字符串，等待客户端的 ClientHello
         $this->assertEquals('', $result);
     }
@@ -84,7 +83,6 @@ class TLSTest extends TestCase
 
         $result = $clientTLS->startHandshake();
 
-        $this->assertIsString($result);
         // 客户端应该返回 ClientHello 消息（非空字符串）
         $this->assertNotEmpty($result);
         // 验证返回的是二进制数据（TLS 记录格式）
@@ -123,7 +121,6 @@ class TLSTest extends TestCase
 
         $result = $this->tls->processMessage($message);
 
-        $this->assertIsArray($result);
         $this->assertArrayHasKey('response', $result);
         $this->assertArrayHasKey('state_changed', $result);
     }
@@ -132,7 +129,6 @@ class TLSTest extends TestCase
     {
         $isComplete = $this->tls->isHandshakeComplete();
 
-        $this->assertIsBool($isComplete);
         $this->assertFalse($isComplete); // 初始状态应该是未完成
     }
     
@@ -222,7 +218,6 @@ class TLSTest extends TestCase
 
         $exportedKey = $this->tls->exportKeyingMaterial($label, $length);
 
-        $this->assertIsString($exportedKey);
         $this->assertEquals($length, strlen($exportedKey));
     }
     
@@ -260,7 +255,6 @@ class TLSTest extends TestCase
     {
         $stats = $this->tls->getStatistics();
 
-        $this->assertIsArray($stats);
         $this->assertArrayHasKey('handshake_complete', $stats);
         $this->assertArrayHasKey('messages_processed', $stats);
         $this->assertArrayHasKey('bytes_encrypted', $stats);
@@ -324,7 +318,6 @@ class TLSTest extends TestCase
 
         $transcriptHash = $this->tls->getTranscriptHash();
 
-        $this->assertIsString($transcriptHash);
         $this->assertEquals(32, strlen($transcriptHash)); // SHA256 hash length
     }
     
@@ -332,7 +325,6 @@ class TLSTest extends TestCase
     {
         $suites = TLS::getSupportedCipherSuites();
 
-        $this->assertIsArray($suites);
         $this->assertContains('TLS_AES_128_GCM_SHA256', $suites);
         $this->assertContains('TLS_AES_256_GCM_SHA384', $suites);
         $this->assertContains('TLS_CHACHA20_POLY1305_SHA256', $suites);
@@ -350,7 +342,6 @@ class TLSTest extends TestCase
     {
         $info = $this->tls->getConnectionInfo();
 
-        $this->assertIsArray($info);
         $this->assertArrayHasKey('is_server', $info);
         $this->assertArrayHasKey('cipher_suite', $info);
         $this->assertArrayHasKey('handshake_complete', $info);
@@ -369,8 +360,9 @@ class TLSTest extends TestCase
         foreach ($messageTypes as $type) {
             $message = pack('C', $type) . 'test message';
             $result = $this->tls->processMessage($message);
-
-            $this->assertIsArray($result);
+            
+            // 只需要验证没有抛出异常
+            $this->assertNotNull($result);
         }
     }
     
@@ -380,7 +372,6 @@ class TLSTest extends TestCase
 
         $result = $this->tls->processMessage($corruptedData);
 
-        $this->assertIsArray($result);
         $this->assertArrayHasKey('error', $result);
     }
     

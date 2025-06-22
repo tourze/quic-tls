@@ -12,8 +12,6 @@ namespace Tourze\QUIC\TLS;
 class KeyScheduler
 {
     // TLS 1.3标签
-    private const LABEL_TLS13_KEY = 'tls13 key';
-    private const LABEL_TLS13_IV = 'tls13 iv';
     private const LABEL_TLS13_FINISHED = 'tls13 finished';
     private const LABEL_TLS13_RESUMPTION = 'tls13 resumption master secret';
     private const LABEL_TLS13_DERIVED = 'tls13 derived';
@@ -40,7 +38,6 @@ class KeyScheduler
     ];
 
     private string $cipherSuite = 'TLS_AES_128_GCM_SHA256'; // 默认使用 AES-128
-    private int $keyLength = 32; // AES-256密钥长度
     private int $ivLength = 12; // GCM IV长度
 
     public function __construct(string $cipherSuite = 'TLS_AES_128_GCM_SHA256')
