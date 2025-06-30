@@ -10,10 +10,12 @@ use Tourze\QUIC\TLS\Message\ClientHello;
 use Tourze\QUIC\TLS\Message\EncryptedExtensions;
 use Tourze\QUIC\TLS\Message\Finished;
 use Tourze\QUIC\TLS\Message\ServerHello;
+use Tourze\QUIC\TLS\Exception\InvalidParameterException;
+use Tourze\QUIC\TLS\Exception\TlsProtocolException;
 
 /**
  * TLS 消息处理器
- * 
+ *
  * 负责解析和处理 TLS 握手消息
  */
 class MessageHandler
@@ -43,7 +45,7 @@ class MessageHandler
         while ($offset < strlen($data)) {
             // 解析 TLS 记录头
             if (strlen($data) - $offset < 5) {
-                throw new \InvalidArgumentException('TLS 记录头不完整');
+                throw new InvalidParameterException('TLS 记录头不完整');
             }
             
             $recordType = ord($data[$offset]);
@@ -51,11 +53,11 @@ class MessageHandler
             $recordLength = unpack('n', substr($data, $offset + 3, 2))[1];
             
             if ($recordLength > self::MAX_RECORD_SIZE) {
-                throw new \InvalidArgumentException('TLS 记录大小超过限制');
+                throw new InvalidParameterException('TLS 记录大小超过限制');
             }
             
             if (strlen($data) - $offset - 5 < $recordLength) {
-                throw new \InvalidArgumentException('TLS 记录数据不完整');
+                throw new InvalidParameterException('TLS 记录数据不完整');
             }
             
             $recordData = substr($data, $offset + 5, $recordLength);
@@ -73,10 +75,10 @@ class MessageHandler
                     
                 case self::RECORD_TYPE_APPLICATION_DATA:
                     // 应用数据在握手期间不应该出现
-                    throw new \RuntimeException('握手期间收到应用数据');
+                    throw new TlsProtocolException('握手期间收到应用数据');
                     
                 default:
-                    throw new \InvalidArgumentException("未知的 TLS 记录类型: {$recordType}");
+                    throw new InvalidParameterException("未知的 TLS 记录类型: {$recordType}");
             }
         }
         
@@ -93,21 +95,21 @@ class MessageHandler
         
         while ($offset < strlen($data)) {
             if (strlen($data) - $offset < 4) {
-                throw new \InvalidArgumentException('握手消息头不完整');
+                throw new InvalidParameterException('握手消息头不完整');
             }
             
             $messageType = ord($data[$offset]);
             // 读取3字节的长度字段（big-endian）
             $lengthBytes = substr($data, $offset + 1, 3);
             if (strlen($lengthBytes) < 3) {
-                throw new \InvalidArgumentException('握手消息长度字段不完整');
+                throw new InvalidParameterException('握手消息长度字段不完整');
             }
             $messageLength = unpack('N', "\x00" . $lengthBytes)[1];
             
             if (strlen($data) - $offset - 4 < $messageLength) {
                 // 添加更详细的错误信息
                 $available = strlen($data) - $offset - 4;
-                throw new \InvalidArgumentException("握手消息数据不完整: 需要 {$messageLength} 字节，但只有 {$available} 字节可用");
+                throw new InvalidParameterException("握手消息数据不完整: 需要 {$messageLength} 字节，但只有 {$available} 字节可用");
             }
             
             $messageData = substr($data, $offset, 4 + $messageLength);
@@ -130,7 +132,7 @@ class MessageHandler
     private function handleAlert(string $data): void
     {
         if (strlen($data) < 2) {
-            throw new \InvalidArgumentException('警报消息太短');
+            throw new InvalidParameterException('警报消息太短');
         }
         
         $level = ord($data[0]);
@@ -145,7 +147,7 @@ class MessageHandler
         $descStr = $this->getAlertDescription($description);
         
         if ($level === 2) {
-            throw new \RuntimeException("收到致命 TLS 警报: {$descStr}");
+            throw new TlsProtocolException("收到致命 TLS 警报: {$descStr}");
         }
     }
     
@@ -194,7 +196,7 @@ class MessageHandler
     public function createRecord(int $type, string $data, int $version = self::TLS_VERSION_1_3): string
     {
         if (strlen($data) > self::MAX_RECORD_SIZE) {
-            throw new \InvalidArgumentException('数据大小超过 TLS 记录限制');
+            throw new InvalidParameterException('数据大小超过 TLS 记录限制');
         }
         
         return pack('C', $type) .
@@ -282,7 +284,7 @@ class MessageHandler
     public function decodeMessage(int $type, string $data): object
     {
         if (!$this->validateMessage($type, $data)) {
-            throw new \InvalidArgumentException('消息格式无效');
+            throw new InvalidParameterException('消息格式无效');
         }
         
         $payload = substr($data, 4);
@@ -294,7 +296,7 @@ class MessageHandler
             11 => Certificate::decode($payload),
             15 => CertificateVerify::decode($payload),
             20 => Finished::decode($payload),
-            default => throw new \InvalidArgumentException("不支持的消息类型: {$type}"),
+            default => throw new InvalidParameterException("不支持的消息类型: {$type}"),
         };
     }
     
@@ -378,14 +380,14 @@ class MessageHandler
     public function parseMessage(string $data): array
     {
         if (strlen($data) < 4) {
-            throw new \InvalidArgumentException('消息数据不完整');
+            throw new InvalidParameterException('消息数据不完整');
         }
         
         $type = ord($data[0]);
         $length = unpack('N', "\x00" . substr($data, 1, 3))[1];
         
         if (strlen($data) < 4 + $length) {
-            throw new \InvalidArgumentException('消息数据不完整');
+            throw new InvalidParameterException('消息数据不完整');
         }
         
         $body = substr($data, 4, $length);
@@ -412,7 +414,7 @@ class MessageHandler
     public function parseAlert(string $data): array
     {
         if (strlen($data) < 2) {
-            throw new \InvalidArgumentException('Alert 数据不完整');
+            throw new InvalidParameterException('Alert 数据不完整');
         }
         
         return [
@@ -440,7 +442,7 @@ class MessageHandler
     public function unwrapRecord(string $data): array
     {
         if (strlen($data) < 5) {
-            throw new \InvalidArgumentException('记录数据不完整');
+            throw new InvalidParameterException('记录数据不完整');
         }
         
         $type = ord($data[0]);
@@ -448,7 +450,7 @@ class MessageHandler
         $length = unpack('n', substr($data, 3, 2))[1];
         
         if (strlen($data) < 5 + $length) {
-            throw new \InvalidArgumentException('记录数据不完整');
+            throw new InvalidParameterException('记录数据不完整');
         }
         
         $payload = substr($data, 5, $length);

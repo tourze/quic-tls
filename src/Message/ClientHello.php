@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Tourze\QUIC\TLS\Message;
 
+use Tourze\QUIC\TLS\Exception\InvalidParameterException;
+
 use Tourze\QUIC\TLS\TransportParameters;
 
 /**
@@ -85,21 +87,45 @@ class ClientHello
         $offset += 32;
         
         // Session ID
+        if ($offset >= strlen($data)) {
+            throw new InvalidParameterException("数据不完整：缺少 Session ID 长度");
+        }
         $sessionIdLength = ord($data[$offset]);
         $offset++;
+        if ($offset + $sessionIdLength > strlen($data)) {
+            throw new InvalidParameterException("数据不完整：Session ID 数据不足");
+        }
         $clientHello->sessionId = substr($data, $offset, $sessionIdLength);
         $offset += $sessionIdLength;
         
         // Cipher Suites
-        $cipherSuitesLength = unpack('n', substr($data, $offset, 2))[1];
+        if ($offset + 2 > strlen($data)) {
+            throw new InvalidParameterException("数据不完整：缺少 Cipher Suites 长度");
+        }
+        $cipherSuitesData = substr($data, $offset, 2);
+        if (strlen($cipherSuitesData) < 2) {
+            throw new InvalidParameterException("数据不完整：Cipher Suites 长度数据不足");
+        }
+        $cipherSuitesLength = unpack('n', $cipherSuitesData)[1];
         $offset += 2;
+        if ($offset + $cipherSuitesLength > strlen($data)) {
+            throw new InvalidParameterException("数据不完整：Cipher Suites 数据不足");
+        }
         $clientHello->cipherSuites = [];
         for ($i = 0; $i < $cipherSuitesLength; $i += 2) {
-            $clientHello->cipherSuites[] = unpack('n', substr($data, $offset + $i, 2))[1];
+            if ($offset + $i + 2 <= strlen($data)) {
+                $cipherSuiteData = substr($data, $offset + $i, 2);
+                if (strlen($cipherSuiteData) === 2) {
+                    $clientHello->cipherSuites[] = unpack('n', $cipherSuiteData)[1];
+                }
+            }
         }
         $offset += $cipherSuitesLength;
         
         // Compression Methods
+        if ($offset >= strlen($data)) {
+            throw new InvalidParameterException("数据不完整：缺少压缩方法长度");
+        }
         $compressionLength = ord($data[$offset]);
         $offset++;
         $clientHello->compressionMethods = [];

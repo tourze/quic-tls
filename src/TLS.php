@@ -6,10 +6,13 @@ namespace Tourze\QUIC\TLS;
 
 use Tourze\QUIC\TLS\TLS\CryptoManager;
 use Tourze\QUIC\TLS\TLS\HandshakeManager;
+use Tourze\QUIC\TLS\Exception\InvalidHandshakeStateException;
+use Tourze\QUIC\TLS\Exception\InvalidParameterException;
+use Tourze\QUIC\TLS\Exception\TlsProtocolException;
 
 /**
  * QUIC TLS 主入口类
- * 
+ *
  * 提供 QUIC 协议中 TLS 1.3 握手和加密功能的统一接口
  */
 class TLS
@@ -92,7 +95,7 @@ class TLS
     public function startHandshake(): string
     {
         if ($this->state !== self::STATE_INITIAL) {
-            throw new \RuntimeException("不能在状态 {$this->state} 下开始握手");
+            throw new InvalidHandshakeStateException("不能在状态 {$this->state} 下开始握手");
         }
         
         $this->state = self::STATE_HANDSHAKING;
@@ -107,7 +110,7 @@ class TLS
         }
         
         // 返回初始消息字符串
-        return $initialMessage ?: '';
+        return $initialMessage !== '' ? $initialMessage : '';
     }
     
     /**
@@ -120,7 +123,7 @@ class TLS
     public function processHandshakeData(string $data, string $level = self::LEVEL_INITIAL): array
     {
         if ($this->state === self::STATE_CLOSED) {
-            throw new \RuntimeException("连接已关闭");
+            throw new InvalidHandshakeStateException("连接已关闭");
         }
         
         // 如果服务器还在初始状态，自动开始握手
@@ -182,7 +185,7 @@ class TLS
     public function encrypt(string $plaintext, string $associatedData = ''): string
     {
         if ($this->state !== self::STATE_ESTABLISHED) {
-            throw new \RuntimeException("连接未建立，无法加密数据");
+            throw new InvalidHandshakeStateException("连接未建立，无法加密数据");
         }
         
         $ciphertext = $this->cryptoManager->encrypt($plaintext, $this->currentLevel, $associatedData);
@@ -203,7 +206,7 @@ class TLS
     public function decrypt(string $ciphertext, string $associatedData = ''): string
     {
         if ($this->state !== self::STATE_ESTABLISHED) {
-            throw new \RuntimeException("连接未建立，无法解密数据");
+            throw new InvalidHandshakeStateException("连接未建立，无法解密数据");
         }
         
         $plaintext = $this->cryptoManager->decrypt($ciphertext, $this->currentLevel, $associatedData);
@@ -245,7 +248,7 @@ class TLS
     public function updateKeys(): void
     {
         if ($this->state !== self::STATE_ESTABLISHED) {
-            throw new \RuntimeException("连接未建立，无法更新密钥");
+            throw new InvalidHandshakeStateException("连接未建立，无法更新密钥");
         }
         
         // 确保CryptoManager处于正确的级别
@@ -266,7 +269,7 @@ class TLS
     public function exportKeyingMaterial(string $label, int $length): string
     {
         if ($this->state !== self::STATE_ESTABLISHED) {
-            throw new \RuntimeException("连接未建立，无法导出密钥");
+            throw new InvalidHandshakeStateException("连接未建立，无法导出密钥");
         }
         
         return $this->handshakeManager->exportKeyingMaterial($label, $length);
@@ -402,7 +405,7 @@ class TLS
     public function setCipherSuite(string $cipherSuite): void
     {
         if (!in_array($cipherSuite, self::getSupportedCipherSuites())) {
-            throw new \InvalidArgumentException("不支持的密码套件: {$cipherSuite}");
+            throw new InvalidParameterException("不支持的密码套件: {$cipherSuite}");
         }
         $this->config['cipher_suite'] = $cipherSuite;
     }

@@ -5,10 +5,12 @@ declare(strict_types=1);
 namespace Tourze\QUIC\TLS;
 
 use OpenSSLAsymmetricKey;
+use Tourze\QUIC\TLS\Exception\InvalidCertificateException;
+use Tourze\QUIC\TLS\Exception\CertificateValidationException;
 
 /**
  * 证书验证器
- * 
+ *
  * 实现X.509证书验证、证书链验证和数字签名验证
  */
 class CertificateValidator
@@ -42,7 +44,7 @@ class CertificateValidator
             try {
                 $this->serverPrivateKey = openssl_pkey_get_private($options['server_key']);
             } catch (\Throwable $e) {
-                throw new \InvalidArgumentException('无效的服务器私钥: ' . $e->getMessage(), previous: $e);
+                throw new InvalidCertificateException('无效的服务器私钥: ' . $e->getMessage(), previous: $e);
             }
         }
         
@@ -242,7 +244,7 @@ class CertificateValidator
     public function signTranscript(string $transcriptHash): string
     {
         if ($this->serverPrivateKey === null) {
-            throw new \RuntimeException('服务器私钥未设置');
+            throw new CertificateValidationException('服务器私钥未设置');
         }
 
         // 构造TLS 1.3签名上下文
@@ -253,7 +255,7 @@ class CertificateValidator
 
         $signature = '';
         if (openssl_sign($contextString, $signature, $this->serverPrivateKey, OPENSSL_ALGO_SHA256) === false) {
-            throw new \RuntimeException('签名失败');
+            throw new CertificateValidationException('签名失败');
         }
 
         return $signature;
@@ -294,7 +296,7 @@ class CertificateValidator
             try {
                 $this->serverPrivateKey = openssl_pkey_get_private($privateKey);
             } catch (\Throwable $e) {
-                throw new \InvalidArgumentException('无效的私钥: ' . $e->getMessage());
+                throw new InvalidCertificateException('无效的私钥: ' . $e->getMessage());
             }
         }
     }
@@ -307,7 +309,7 @@ class CertificateValidator
         try {
             $this->serverPrivateKey = openssl_pkey_get_private($privateKey);
         } catch (\Throwable $e) {
-            throw new \InvalidArgumentException('无效的私钥: ' . $e->getMessage());
+            throw new InvalidCertificateException('无效的私钥: ' . $e->getMessage());
         }
     }
 
@@ -510,7 +512,7 @@ class CertificateValidator
     {
         $info = openssl_x509_parse($certificate);
         if ($info === false) {
-            throw new \InvalidArgumentException('无法解析证书');
+            throw new InvalidCertificateException('无法解析证书');
         }
 
         // 添加额外的字段以满足测试需求
@@ -567,7 +569,7 @@ class CertificateValidator
     {
         $x509 = openssl_x509_read($certificate);
         if ($x509 === false) {
-            throw new \InvalidArgumentException('无法解析证书');
+            throw new InvalidCertificateException('无法解析证书');
         }
         
         openssl_x509_export($x509, $pem);
@@ -621,14 +623,14 @@ class CertificateValidator
     {
         $key = openssl_pkey_get_private($privateKey);
         if ($key === false) {
-            throw new \InvalidArgumentException('无效的私钥');
+            throw new InvalidCertificateException('无效的私钥');
         }
         
         $signature = '';
         $result = openssl_sign($data, $signature, $key, OPENSSL_ALGO_SHA256);
         
         if (!$result) {
-            throw new \RuntimeException('签名失败');
+            throw new CertificateValidationException('签名失败');
         }
         
         return $signature;

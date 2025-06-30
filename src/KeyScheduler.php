@@ -4,9 +4,11 @@ declare(strict_types=1);
 
 namespace Tourze\QUIC\TLS;
 
+use Tourze\QUIC\TLS\Exception\TlsProtocolException;
+
 /**
  * TLS 1.3密钥调度器
- * 
+ *
  * 根据RFC 8446实现TLS 1.3密钥派生和管理
  */
 class KeyScheduler
@@ -134,7 +136,7 @@ class KeyScheduler
         $baseKey = $isServer ? $this->handshakeKeys['server'] : $this->handshakeKeys['client'];
         
         if ($baseKey === null) {
-            throw new \RuntimeException('握手密钥未初始化');
+            throw new TlsProtocolException('握手密钥未初始化');
         }
         
         // finished_key = HKDF-Expand-Label(BaseKey, "finished", "", Hash.length)

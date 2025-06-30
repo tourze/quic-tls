@@ -4,9 +4,11 @@ declare(strict_types=1);
 
 namespace Tourze\QUIC\TLS;
 
+use Tourze\QUIC\TLS\Exception\InvalidParameterException;
+
 /**
  * QUIC传输参数处理类
- * 
+ *
  * 根据RFC 9000实现QUIC传输参数的编解码和协商
  */
 class TransportParameters
@@ -97,7 +99,7 @@ class TransportParameters
             $valueLength = self::decodeVarInt($data, $offset);
             
             if ($offset + $valueLength > $length) {
-                throw new \InvalidArgumentException('传输参数数据不完整');
+                throw new InvalidParameterException('传输参数数据不完整');
             }
             
             $valueData = substr($data, $offset, $valueLength);
@@ -343,7 +345,7 @@ class TransportParameters
         } else {
             // 8 字节 - 使用更安全的方式处理大整数
             if ($value >= 0x4000000000000000) {
-                throw new \InvalidArgumentException('值超出VarInt范围');
+                throw new InvalidParameterException('值超出VarInt范围');
             }
             // 0xc000000000000000 = 13835058055282163712 (超过 PHP_INT_MAX)
             // 需要分两步处理
@@ -360,14 +362,14 @@ class TransportParameters
     private static function decodeVarInt(string $data, int &$offset): int
     {
         if ($offset >= strlen($data)) {
-            throw new \InvalidArgumentException('数据不足以解码VarInt');
+            throw new InvalidParameterException('数据不足以解码VarInt');
         }
         
         $first = ord($data[$offset]);
         $length = 1 << ($first >> 6);
         
         if ($offset + $length > strlen($data)) {
-            throw new \InvalidArgumentException('VarInt数据不完整');
+            throw new InvalidParameterException('VarInt数据不完整');
         }
         
         $value = $first & 0x3f;

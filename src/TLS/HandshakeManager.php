@@ -8,10 +8,11 @@ use Tourze\QUIC\TLS\CertificateValidator;
 use Tourze\QUIC\TLS\HandshakeStateMachine;
 use Tourze\QUIC\TLS\KeyScheduler;
 use Tourze\QUIC\TLS\TransportParameters;
+use Tourze\QUIC\TLS\Exception\TlsProtocolException;
 
 /**
  * TLS 握手管理器
- * 
+ *
  * 管理 TLS 握手的高级操作和状态协调
  */
 class HandshakeManager
@@ -60,7 +61,7 @@ class HandshakeManager
     public function startHandshake(): string
     {
         if ($this->localParams === null) {
-            throw new \RuntimeException('传输参数未设置');
+            throw new TlsProtocolException('传输参数未设置');
         }
         
         if (!$this->isServer) {
@@ -198,7 +199,7 @@ class HandshakeManager
     private function deriveApplicationSecrets(): void
     {
         if ($this->handshakeSecret === null) {
-            throw new \RuntimeException("握手密钥未设置");
+            throw new TlsProtocolException("握手密钥未设置");
         }
         
         // 派生主密钥
@@ -276,7 +277,7 @@ class HandshakeManager
     public function exportKeyingMaterial(string $label, $arg2 = null, ?int $length = null): string
     {
         if ($this->masterSecret === null) {
-            throw new \RuntimeException("主密钥未设置");
+            throw new TlsProtocolException("主密钥未设置");
         }
         
         // 根据参数个数确定调用方式

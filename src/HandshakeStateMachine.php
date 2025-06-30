@@ -10,10 +10,13 @@ use Tourze\QUIC\TLS\Message\ClientHello;
 use Tourze\QUIC\TLS\Message\EncryptedExtensions;
 use Tourze\QUIC\TLS\Message\Finished;
 use Tourze\QUIC\TLS\Message\ServerHello;
+use Tourze\QUIC\TLS\Exception\InvalidParameterException;
+use Tourze\QUIC\TLS\Exception\InvalidHandshakeStateException;
+use Tourze\QUIC\TLS\Exception\TlsProtocolException;
 
 /**
  * TLS 1.3握手状态机
- * 
+ *
  * 根据RFC 8446实现TLS 1.3握手流程
  */
 class HandshakeStateMachine
@@ -67,14 +70,14 @@ class HandshakeStateMachine
     public function processMessage(string $message): string
     {
         if (strlen($message) < 4) {
-            throw new \InvalidArgumentException('握手消息太短');
+            throw new InvalidParameterException('握手消息太短');
         }
 
         $type = ord($message[0]);
         $length = unpack('N', "\x00" . substr($message, 1, 3))[1];
         
         if (strlen($message) < 4 + $length) {
-            throw new \InvalidArgumentException('握手消息长度不匹配');
+            throw new InvalidParameterException('握手消息长度不匹配');
         }
 
         $payload = substr($message, 4, $length);
@@ -97,7 +100,7 @@ class HandshakeStateMachine
             $type === self::MSG_CERTIFICATE => $this->handleCertificate($payload),
             $type === self::MSG_CERTIFICATE_VERIFY => $this->handleCertificateVerify($payload),
             $type === self::MSG_FINISHED => $this->handleFinished($payload),
-            default => throw new \InvalidArgumentException("不支持的握手消息类型: {$type}"),
+            default => throw new InvalidParameterException("不支持的握手消息类型: {$type}"),
         };
     }
 
@@ -107,7 +110,7 @@ class HandshakeStateMachine
     private function handleClientHello(string $payload): string
     {
         if ($this->currentState !== self::STATE_INITIAL || !$this->isServer) {
-            throw new \RuntimeException('状态错误：不能处理ClientHello');
+            throw new InvalidHandshakeStateException('状态错误：不能处理ClientHello');
         }
 
         $clientHello = ClientHello::decode($payload);
@@ -163,7 +166,7 @@ class HandshakeStateMachine
     private function handleServerHello(string $payload): string
     {
         if ($this->currentState !== self::STATE_WAIT_SERVER_HELLO || $this->isServer) {
-            throw new \RuntimeException('状态错误：不能处理ServerHello');
+            throw new InvalidHandshakeStateException('状态错误：不能处理ServerHello');
         }
 
         $serverHello = ServerHello::decode($payload);
@@ -183,7 +186,7 @@ class HandshakeStateMachine
     private function handleEncryptedExtensions(string $payload): string
     {
         if ($this->currentState !== self::STATE_WAIT_ENCRYPTED_EXTENSIONS || $this->isServer) {
-            throw new \RuntimeException('状态错误：不能处理EncryptedExtensions');
+            throw new InvalidHandshakeStateException('状态错误：不能处理EncryptedExtensions');
         }
 
         $encryptedExt = EncryptedExtensions::decode($payload);
@@ -205,7 +208,7 @@ class HandshakeStateMachine
     private function handleCertificate(string $payload): string
     {
         if ($this->currentState !== self::STATE_WAIT_CERTIFICATE || $this->isServer) {
-            throw new \RuntimeException('状态错误：不能处理Certificate');
+            throw new InvalidHandshakeStateException('状态错误：不能处理Certificate');
         }
 
         $certificate = Certificate::decode($payload);
@@ -213,7 +216,7 @@ class HandshakeStateMachine
         // 验证证书
         if (!$this->certValidator->validateCertificate($certificate->getCertificateChain())) {
             $this->currentState = self::STATE_ERROR;
-            throw new \RuntimeException('证书验证失败');
+            throw new TlsProtocolException('证书验证失败');
         }
         
         $this->currentState = self::STATE_WAIT_CERTIFICATE_VERIFY;
@@ -227,7 +230,7 @@ class HandshakeStateMachine
     private function handleCertificateVerify(string $payload): string
     {
         if ($this->currentState !== self::STATE_WAIT_CERTIFICATE_VERIFY || $this->isServer) {
-            throw new \RuntimeException('状态错误：不能处理CertificateVerify');
+            throw new InvalidHandshakeStateException('状态错误：不能处理CertificateVerify');
         }
 
         $certVerify = CertificateVerify::decode($payload);
@@ -236,7 +239,7 @@ class HandshakeStateMachine
         $transcriptHash = $this->computeTranscriptHash();
         if (!$this->certValidator->verifyTranscriptSignature($transcriptHash, $certVerify->getSignature())) {
             $this->currentState = self::STATE_ERROR;
-            throw new \RuntimeException('证书签名验证失败');
+            throw new TlsProtocolException('证书签名验证失败');
         }
         
         $this->currentState = self::STATE_WAIT_FINISHED;
@@ -253,7 +256,7 @@ class HandshakeStateMachine
         
         if ($this->isServer) {
             if ($this->currentState !== self::STATE_WAIT_CLIENT_FINISHED) {
-                throw new \RuntimeException("状态错误：不能处理客户端Finished，当前状态: {$this->currentState}");
+                throw new InvalidHandshakeStateException("状态错误：不能处理客户端Finished，当前状态: {$this->currentState}");
             }
             
             // 验证客户端Finished消息（在测试环境中简化验证）
@@ -277,7 +280,7 @@ class HandshakeStateMachine
             ];
             
             if (!in_array($this->currentState, $validStates)) {
-                throw new \RuntimeException("状态错误：不能处理服务端Finished，当前状态: {$this->currentState}");
+                throw new InvalidHandshakeStateException("状态错误：不能处理服务端Finished，当前状态: {$this->currentState}");
             }
             
             // 验证服务端Finished消息（在测试环境中简化验证）
@@ -315,7 +318,7 @@ class HandshakeStateMachine
     public function startClientHandshake(): string
     {
         if ($this->currentState !== self::STATE_INITIAL || $this->isServer) {
-            throw new \RuntimeException('状态错误：不能开始客户端握手');
+            throw new InvalidHandshakeStateException('状态错误：不能开始客户端握手');
         }
 
         $clientHello = new ClientHello($this->localParams);

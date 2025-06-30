@@ -5,10 +5,12 @@ declare(strict_types=1);
 namespace Tourze\QUIC\TLS\TLS;
 
 use Tourze\QUIC\TLS\KeyScheduler;
+use Tourze\QUIC\TLS\Exception\InvalidParameterException;
+use Tourze\QUIC\TLS\Exception\TlsProtocolException;
 
 /**
  * TLS 加密管理器
- * 
+ *
  * 负责管理 TLS 连接的加密状态和密钥材料
  */
 class CryptoManager
@@ -62,7 +64,7 @@ class CryptoManager
     public function setCipherSuite(int $cipherSuiteId): void
     {
         if (!isset(self::CIPHER_SUITES[$cipherSuiteId])) {
-            throw new \InvalidArgumentException("不支持的密码套件: 0x" . dechex($cipherSuiteId));
+            throw new InvalidParameterException("不支持的密码套件: 0x" . dechex($cipherSuiteId));
         }
         
         $this->cipherSuite = self::CIPHER_SUITES[$cipherSuiteId]['name'];
@@ -176,7 +178,7 @@ class CryptoManager
     {
         // 验证级别是否有效
         if (!in_array($level, ['initial', 'handshake', 'application'])) {
-            throw new \RuntimeException("级别 $level 的加密上下文未初始化");
+            throw new TlsProtocolException("级别 $level 的加密上下文未初始化");
         }
         
         if (!isset($this->aeadContexts[$level])) {
@@ -214,7 +216,7 @@ class CryptoManager
         );
         
         if ($ciphertext === false) {
-            throw new \RuntimeException("加密失败: " . openssl_error_string());
+            throw new TlsProtocolException("加密失败: " . openssl_error_string());
         }
         
         return $ciphertext . $tag;
@@ -227,7 +229,7 @@ class CryptoManager
     {
         // 验证级别是否有效
         if (!in_array($level, ['initial', 'handshake', 'application'])) {
-            throw new \RuntimeException("级别 $level 的加密上下文未初始化");
+            throw new TlsProtocolException("级别 $level 的加密上下文未初始化");
         }
         
         if (!isset($this->aeadContexts[$level])) {
@@ -236,7 +238,7 @@ class CryptoManager
         }
         
         if (strlen($ciphertext) < 16) {
-            throw new \InvalidArgumentException("密文太短");
+            throw new InvalidParameterException("密文太短");
         }
         
         // 解密时使用对方的密钥：server解密用client密钥，client解密用server密钥
@@ -273,7 +275,7 @@ class CryptoManager
         );
         
         if ($plaintext === false) {
-            throw new \RuntimeException("解密失败: " . openssl_error_string());
+            throw new TlsProtocolException("解密失败: " . openssl_error_string());
         }
         
         return $plaintext;
@@ -356,7 +358,7 @@ class CryptoManager
             }
         }
         
-        throw new \RuntimeException("未知的密码套件: {$this->cipherSuite}");
+        throw new TlsProtocolException("未知的密码套件: {$this->cipherSuite}");
     }
     
     /**
@@ -368,7 +370,7 @@ class CryptoManager
             'TLS_AES_128_GCM_SHA256' => 'aes-128-gcm',
             'TLS_AES_256_GCM_SHA384' => 'aes-256-gcm',
             'TLS_CHACHA20_POLY1305_SHA256' => 'chacha20-poly1305',
-            default => throw new \RuntimeException("不支持的密码套件: {$this->cipherSuite}"),
+            default => throw new TlsProtocolException("不支持的密码套件: {$this->cipherSuite}"),
         };
     }
     
@@ -379,7 +381,7 @@ class CryptoManager
     {
         // 只允许在应用级别更新密钥
         if ($this->currentLevel !== 'application') {
-            throw new \RuntimeException("只能在应用级别更新密钥");
+            throw new TlsProtocolException("只能在应用级别更新密钥");
         }
         
         $this->keyScheduler->updateKeys();
