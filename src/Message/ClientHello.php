@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace Tourze\QUIC\TLS\Message;
 
 use Tourze\QUIC\TLS\Exception\InvalidParameterException;
-
 use Tourze\QUIC\TLS\TransportParameters;
 
 /**
@@ -14,15 +13,24 @@ use Tourze\QUIC\TLS\TransportParameters;
 class ClientHello
 {
     private string $protocolVersion = "\x03\x04"; // TLS 1.3
+
     private string $random;
+
     private string $sessionId;
+
+    /** @var array<int> */
     private array $cipherSuites = [
         0x1301, // TLS_AES_128_GCM_SHA256
         0x1302, // TLS_AES_256_GCM_SHA384
         0x1303, // TLS_CHACHA20_POLY1305_SHA256
     ];
+
+    /** @var array<int> */
     private array $compressionMethods = [0x00]; // null compression
+
+    /** @var array<int, string> */
     private array $extensions = [];
+
     private ?TransportParameters $transportParameters = null;
 
     public function __construct(?TransportParameters $transportParams = null)
@@ -39,34 +47,34 @@ class ClientHello
     public function encode(): string
     {
         $data = '';
-        
+
         // Protocol Version
         $data .= $this->protocolVersion;
-        
+
         // Random
         $data .= $this->random;
-        
+
         // Session ID
         $data .= chr(strlen($this->sessionId)) . $this->sessionId;
-        
+
         // Cipher Suites
         $cipherSuitesData = '';
         foreach ($this->cipherSuites as $suite) {
             $cipherSuitesData .= pack('n', $suite);
         }
         $data .= pack('n', strlen($cipherSuitesData)) . $cipherSuitesData;
-        
+
         // Compression Methods
         $compressionData = '';
         foreach ($this->compressionMethods as $method) {
             $compressionData .= chr($method);
         }
         $data .= chr(strlen($compressionData)) . $compressionData;
-        
+
         // Extensions
         $extensionsData = $this->encodeExtensions();
         $data .= pack('n', strlen($extensionsData)) . $extensionsData;
-        
+
         return $data;
     }
 
@@ -77,71 +85,145 @@ class ClientHello
     {
         $offset = 0;
         $clientHello = new self();
-        
-        // Protocol Version
-        $clientHello->protocolVersion = substr($data, $offset, 2);
+
+        $offset = $clientHello->decodeProtocolVersionAndRandom($data, $offset);
+        $offset = $clientHello->decodeSessionId($data, $offset);
+        $offset = $clientHello->decodeCipherSuites($data, $offset);
+        $offset = $clientHello->decodeCompressionMethods($data, $offset);
+        $clientHello->decodeExtensions($data, $offset);
+
+        return $clientHello;
+    }
+
+    /**
+     * 解码协议版本和随机数
+     */
+    private function decodeProtocolVersionAndRandom(string $data, int $offset): int
+    {
+        $this->protocolVersion = substr($data, $offset, 2);
         $offset += 2;
-        
-        // Random
-        $clientHello->random = substr($data, $offset, 32);
-        $offset += 32;
-        
-        // Session ID
-        if ($offset >= strlen($data)) {
-            throw new InvalidParameterException("数据不完整：缺少 Session ID 长度");
-        }
+        $this->random = substr($data, $offset, 32);
+
+        return $offset + 32;
+    }
+
+    /**
+     * 解码会话ID
+     */
+    private function decodeSessionId(string $data, int $offset): int
+    {
+        $this->validateDataAvailable($data, $offset, 1, '缺少 Session ID 长度');
+
         $sessionIdLength = ord($data[$offset]);
-        $offset++;
-        if ($offset + $sessionIdLength > strlen($data)) {
-            throw new InvalidParameterException("数据不完整：Session ID 数据不足");
+        ++$offset;
+
+        $this->validateDataAvailable($data, $offset, $sessionIdLength, 'Session ID 数据不足');
+
+        $this->sessionId = substr($data, $offset, $sessionIdLength);
+
+        return $offset + $sessionIdLength;
+    }
+
+    /**
+     * 解码密码套件
+     */
+    private function decodeCipherSuites(string $data, int $offset): int
+    {
+        $this->validateDataAvailable($data, $offset, 2, '缺少 Cipher Suites 长度');
+
+        $unpackResult = unpack('n', substr($data, $offset, 2));
+        if (false === $unpackResult) {
+            throw new InvalidParameterException('Failed to unpack cipher suites length');
         }
-        $clientHello->sessionId = substr($data, $offset, $sessionIdLength);
-        $offset += $sessionIdLength;
-        
-        // Cipher Suites
-        if ($offset + 2 > strlen($data)) {
-            throw new InvalidParameterException("数据不完整：缺少 Cipher Suites 长度");
-        }
-        $cipherSuitesData = substr($data, $offset, 2);
-        if (strlen($cipherSuitesData) < 2) {
-            throw new InvalidParameterException("数据不完整：Cipher Suites 长度数据不足");
-        }
-        $cipherSuitesLength = unpack('n', $cipherSuitesData)[1];
+        $cipherSuitesLength = $unpackResult[1];
         $offset += 2;
-        if ($offset + $cipherSuitesLength > strlen($data)) {
-            throw new InvalidParameterException("数据不完整：Cipher Suites 数据不足");
+
+        $this->validateDataAvailable($data, $offset, $cipherSuitesLength, 'Cipher Suites 数据不足');
+
+        $this->cipherSuites = $this->parseCipherSuites($data, $offset, $cipherSuitesLength);
+
+        return $offset + $cipherSuitesLength;
+    }
+
+    /**
+     * 解码压缩方法
+     */
+    private function decodeCompressionMethods(string $data, int $offset): int
+    {
+        $this->validateDataAvailable($data, $offset, 1, '缺少压缩方法长度');
+
+        $compressionLength = ord($data[$offset]);
+        ++$offset;
+
+        $this->compressionMethods = $this->parseCompressionMethods($data, $offset, $compressionLength);
+
+        return $offset + $compressionLength;
+    }
+
+    /**
+     * 解码扩展
+     */
+    private function decodeExtensions(string $data, int $offset): void
+    {
+        if ($offset < strlen($data)) {
+            $unpackResult = unpack('n', substr($data, $offset, 2));
+            if (false === $unpackResult) {
+                throw new InvalidParameterException('Failed to unpack extensions length');
+            }
+            $extensionsLength = $unpackResult[1];
+            $offset += 2;
+            $this->parseExtensions(substr($data, $offset, $extensionsLength));
         }
-        $clientHello->cipherSuites = [];
-        for ($i = 0; $i < $cipherSuitesLength; $i += 2) {
+    }
+
+    /**
+     * 验证数据可用性
+     */
+    private function validateDataAvailable(string $data, int $offset, int $required, string $message): void
+    {
+        if ($offset + $required > strlen($data)) {
+            throw new InvalidParameterException('数据不完整：' . $message);
+        }
+    }
+
+    /**
+     * 解析密码套件
+     */
+    /**
+     * @return array<int>
+     */
+    private function parseCipherSuites(string $data, int $offset, int $length): array
+    {
+        $cipherSuites = [];
+        for ($i = 0; $i < $length; $i += 2) {
             if ($offset + $i + 2 <= strlen($data)) {
                 $cipherSuiteData = substr($data, $offset + $i, 2);
-                if (strlen($cipherSuiteData) === 2) {
-                    $clientHello->cipherSuites[] = unpack('n', $cipherSuiteData)[1];
+                if (2 === strlen($cipherSuiteData)) {
+                    $unpackResult = unpack('n', $cipherSuiteData);
+                    if (false !== $unpackResult) {
+                        $cipherSuites[] = $unpackResult[1];
+                    }
                 }
             }
         }
-        $offset += $cipherSuitesLength;
-        
-        // Compression Methods
-        if ($offset >= strlen($data)) {
-            throw new InvalidParameterException("数据不完整：缺少压缩方法长度");
+
+        return $cipherSuites;
+    }
+
+    /**
+     * 解析压缩方法
+     */
+    /**
+     * @return array<int>
+     */
+    private function parseCompressionMethods(string $data, int $offset, int $length): array
+    {
+        $methods = [];
+        for ($i = 0; $i < $length; ++$i) {
+            $methods[] = ord($data[$offset + $i]);
         }
-        $compressionLength = ord($data[$offset]);
-        $offset++;
-        $clientHello->compressionMethods = [];
-        for ($i = 0; $i < $compressionLength; $i++) {
-            $clientHello->compressionMethods[] = ord($data[$offset + $i]);
-        }
-        $offset += $compressionLength;
-        
-        // Extensions
-        if ($offset < strlen($data)) {
-            $extensionsLength = unpack('n', substr($data, $offset, 2))[1];
-            $offset += 2;
-            $clientHello->parseExtensions(substr($data, $offset, $extensionsLength));
-        }
-        
-        return $clientHello;
+
+        return $methods;
     }
 
     /**
@@ -151,21 +233,23 @@ class ClientHello
     {
         // Server Name Indication (SNI)
         $this->extensions[0x0000] = $this->buildSNIExtension('localhost');
-        
+
         // Supported Groups
-        $this->extensions[0x000a] = $this->buildSupportedGroupsExtension();
-        
+        $this->extensions[0x000A] = $this->buildSupportedGroupsExtension();
+
         // Signature Algorithms
-        $this->extensions[0x000d] = $this->buildSignatureAlgorithmsExtension();
-        
+        $this->extensions[0x000D] = $this->buildSignatureAlgorithmsExtension();
+
         // Supported Versions
-        $this->extensions[0x002b] = $this->buildSupportedVersionsExtension();
-        
+        $this->extensions[0x002B] = $this->buildSupportedVersionsExtension();
+
         // Key Share
         $this->extensions[0x0033] = $this->buildKeyShareExtension();
-        
+
         // QUIC Transport Parameters
-        $this->extensions[0x0039] = $this->transportParameters->encode();
+        if (null !== $this->transportParameters) {
+            $this->extensions[0x0039] = $this->transportParameters->encode();
+        }
     }
 
     /**
@@ -174,13 +258,13 @@ class ClientHello
     private function encodeExtensions(): string
     {
         $data = '';
-        
+
         foreach ($this->extensions as $type => $extensionData) {
             $data .= pack('n', $type); // Extension Type
             $data .= pack('n', strlen($extensionData)); // Extension Length
             $data .= $extensionData;
         }
-        
+
         return $data;
     }
 
@@ -191,21 +275,29 @@ class ClientHello
     {
         $offset = 0;
         $length = strlen($data);
-        
+
         while ($offset < $length) {
-            $type = unpack('n', substr($data, $offset, 2))[1];
+            $unpackResult = unpack('n', substr($data, $offset, 2));
+            if (false === $unpackResult) {
+                throw new InvalidParameterException('Failed to unpack extension type');
+            }
+            $type = $unpackResult[1];
             $offset += 2;
-            
-            $extLength = unpack('n', substr($data, $offset, 2))[1];
+
+            $unpackResult = unpack('n', substr($data, $offset, 2));
+            if (false === $unpackResult) {
+                throw new InvalidParameterException('Failed to unpack extension length');
+            }
+            $extLength = $unpackResult[1];
             $offset += 2;
-            
+
             $extData = substr($data, $offset, $extLength);
             $offset += $extLength;
-            
+
             $this->extensions[$type] = $extData;
-            
+
             // 解析QUIC传输参数
-            if ($type === 0x0039) {
+            if (0x0039 === $type) {
                 $this->transportParameters = TransportParameters::decode($extData);
             }
         }
@@ -220,7 +312,7 @@ class ClientHello
         $data .= chr(0x00); // Name Type: host_name
         $data .= pack('n', strlen($hostname)); // Host Name Length
         $data .= $hostname;
-        
+
         return $data;
     }
 
@@ -233,15 +325,15 @@ class ClientHello
             0x0017, // secp256r1
             0x0018, // secp384r1
             0x0019, // secp521r1
-            0x001d, // x25519
-            0x001e, // x448
+            0x001D, // x25519
+            0x001E, // x448
         ];
-        
+
         $data = pack('n', count($groups) * 2); // Named Group List Length
         foreach ($groups as $group) {
             $data .= pack('n', $group);
         }
-        
+
         return $data;
     }
 
@@ -258,12 +350,12 @@ class ClientHello
             0x0805, // rsa_pss_rsae_sha384
             0x0806, // rsa_pss_rsae_sha512
         ];
-        
+
         $data = pack('n', count($algorithms) * 2); // Signature Hash Algorithms Length
         foreach ($algorithms as $algorithm) {
             $data .= pack('n', $algorithm);
         }
-        
+
         return $data;
     }
 
@@ -275,12 +367,12 @@ class ClientHello
         $versions = [
             0x0304, // TLS 1.3
         ];
-        
+
         $data = chr(count($versions) * 2); // Supported Versions Length
         foreach ($versions as $version) {
             $data .= pack('n', $version);
         }
-        
+
         return $data;
     }
 
@@ -292,12 +384,12 @@ class ClientHello
         // 生成x25519密钥对
         $privateKey = random_bytes(32);
         $publicKey = $this->generateX25519PublicKey($privateKey);
-        
+
         $data = pack('n', 2 + 2 + strlen($publicKey)); // Client Key Share Length
-        $data .= pack('n', 0x001d); // Named Group: x25519
+        $data .= pack('n', 0x001D); // Named Group: x25519
         $data .= pack('n', strlen($publicKey)); // Key Exchange Length
         $data .= $publicKey;
-        
+
         return $data;
     }
 
@@ -347,6 +439,9 @@ class ClientHello
     /**
      * 获取密码套件
      */
+    /**
+     * @return array<int>
+     */
     public function getCipherSuites(): array
     {
         return $this->cipherSuites;
@@ -354,6 +449,9 @@ class ClientHello
 
     /**
      * 获取扩展
+     */
+    /**
+     * @return array<int, string>
      */
     public function getExtensions(): array
     {
@@ -367,7 +465,7 @@ class ClientHello
     {
         return $this->extensions[$type] ?? null;
     }
-    
+
     /**
      * 设置随机数
      */
@@ -375,20 +473,26 @@ class ClientHello
     {
         $this->random = $random;
     }
-    
+
     /**
      * 设置密码套件
+     */
+    /**
+     * @param array<int> $cipherSuites
      */
     public function setCipherSuites(array $cipherSuites): void
     {
         $this->cipherSuites = $cipherSuites;
     }
-    
+
     /**
      * 设置扩展
+     */
+    /**
+     * @param array<int, string> $extensions
      */
     public function setExtensions(array $extensions): void
     {
         $this->extensions = $extensions;
     }
-} 
+}

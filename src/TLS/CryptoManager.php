@@ -4,9 +4,9 @@ declare(strict_types=1);
 
 namespace Tourze\QUIC\TLS\TLS;
 
-use Tourze\QUIC\TLS\KeyScheduler;
 use Tourze\QUIC\TLS\Exception\InvalidParameterException;
 use Tourze\QUIC\TLS\Exception\TlsProtocolException;
+use Tourze\QUIC\TLS\KeyScheduler;
 
 /**
  * TLS 加密管理器
@@ -16,61 +16,62 @@ use Tourze\QUIC\TLS\Exception\TlsProtocolException;
 class CryptoManager
 {
     private KeyScheduler $keyScheduler;
-    
+
     // 当前加密级别
     private string $currentLevel = 'initial';
-    
+
     // 各级别的密钥材料
+    /** @var array<string, mixed> */
     private array $keys = [
         'initial' => null,
         'handshake' => null,
         'application' => null,
     ];
-    
+
     // AEAD 加密上下文
+    /** @var array<string, array<string, mixed>> */
     private array $aeadContexts = [
         'initial' => ['client' => null, 'server' => null],
         'handshake' => ['client' => null, 'server' => null],
         'application' => ['client' => null, 'server' => null],
     ];
-    
+
     // 序列号
+    /** @var array<string, array<string, int>> */
     private array $sequenceNumbers = [
         'initial' => ['client' => 0, 'server' => 0],
         'handshake' => ['client' => 0, 'server' => 0],
         'application' => ['client' => 0, 'server' => 0],
     ];
-    
-    private bool $isServer;
+
     private string $cipherSuite;
-    
+
     // 支持的密码套件
     private const CIPHER_SUITES = [
         0x1301 => ['name' => 'TLS_AES_128_GCM_SHA256', 'key_len' => 16, 'iv_len' => 12, 'tag_len' => 16],
         0x1302 => ['name' => 'TLS_AES_256_GCM_SHA384', 'key_len' => 32, 'iv_len' => 12, 'tag_len' => 16],
         0x1303 => ['name' => 'TLS_CHACHA20_POLY1305_SHA256', 'key_len' => 32, 'iv_len' => 12, 'tag_len' => 16],
     ];
-    
-    public function __construct(bool $isServer)
+
+    public function __construct(private readonly bool $isServer)
     {
-        $this->isServer = $isServer;
         $this->keyScheduler = new KeyScheduler();
         $this->cipherSuite = 'TLS_AES_128_GCM_SHA256'; // 默认密码套件
     }
-    
+
     /**
      * 设置密码套件
      */
     public function setCipherSuite(int $cipherSuiteId): void
     {
         if (!isset(self::CIPHER_SUITES[$cipherSuiteId])) {
-            throw new InvalidParameterException("不支持的密码套件: 0x" . dechex($cipherSuiteId));
+            throw new InvalidParameterException('不支持的密码套件: 0x' . dechex($cipherSuiteId));
         }
-        
+
         $this->cipherSuite = self::CIPHER_SUITES[$cipherSuiteId]['name'];
         $this->keyScheduler->setCipherSuite($this->cipherSuite);
     }
-    
+
     /**
      * 设置初始密钥（用于初始包保护）
      */
@@ -78,7 +79,7 @@ class CryptoManager
     {
         $this->setLevelSecrets('initial', $clientInitialSecret, $serverInitialSecret);
     }
-    
+
     /**
      * 设置握手密钥
      */
@@ -87,7 +88,7 @@ class CryptoManager
         $this->setLevelSecrets('handshake', $clientHandshakeSecret, $serverHandshakeSecret);
         $this->currentLevel = 'handshake';
     }
-    
+
     /**
      * 设置应用密钥
      */
@@ -96,53 +97,53 @@ class CryptoManager
         $this->setLevelSecrets('application', $clientAppSecret, $serverAppSecret);
         $this->currentLevel = 'application';
     }
-    
+
     /**
      * 设置特定级别的密钥
      */
     private function setLevelSecrets(string $level, string $clientSecret, string $serverSecret): void
     {
         $cipherInfo = $this->getCipherInfo();
-        
+
         // 派生密钥和 IV
         $clientKey = $this->keyScheduler->hkdfExpandLabel(
             $clientSecret,
-            "quic key",
-            "",
+            'quic key',
+            '',
             $cipherInfo['key_len']
         );
-        
+
         $clientIv = $this->keyScheduler->hkdfExpandLabel(
             $clientSecret,
-            "quic iv",
-            "",
+            'quic iv',
+            '',
             $cipherInfo['iv_len']
         );
-        
+
         $serverKey = $this->keyScheduler->hkdfExpandLabel(
             $serverSecret,
-            "quic key",
-            "",
+            'quic key',
+            '',
             $cipherInfo['key_len']
         );
-        
+
         $serverIv = $this->keyScheduler->hkdfExpandLabel(
             $serverSecret,
-            "quic iv",
-            "",
+            'quic iv',
+            '',
             $cipherInfo['iv_len']
         );
-        
+
         // 存储密钥材料
         $this->keys[$level] = [
             'client' => ['key' => $clientKey, 'iv' => $clientIv],
             'server' => ['key' => $serverKey, 'iv' => $serverIv],
         ];
-        
+
         // 初始化 AEAD 上下文
         $this->initializeAEAD($level);
     }
-    
+
     /**
      * 初始化 AEAD 加密上下文
      */
@@ -156,53 +157,53 @@ class CryptoManager
                     'iv' => str_repeat("\x00", 12),
                 ],
                 'server' => [
-                    'key' => str_repeat("\x00", 32), 
+                    'key' => str_repeat("\x00", 32),
                     'iv' => str_repeat("\x00", 12),
                 ],
             ];
         }
-        
+
         $method = $this->getOpenSSLMethod();
-        
+
         // 这里简化处理，实际应该创建可重用的加密上下文
         $this->aeadContexts[$level] = [
             'client' => ['method' => $method, 'keys' => $this->keys[$level]['client']],
             'server' => ['method' => $method, 'keys' => $this->keys[$level]['server']],
         ];
     }
-    
+
     /**
      * 加密数据
      */
     public function encrypt(string $plaintext, string $level, string $associatedData): string
     {
         // 验证级别是否有效
-        if (!in_array($level, ['initial', 'handshake', 'application'])) {
-            throw new TlsProtocolException("级别 $level 的加密上下文未初始化");
+        if (!in_array($level, ['initial', 'handshake', 'application'], true)) {
+            throw new TlsProtocolException("级别 {$level} 的加密上下文未初始化");
         }
-        
+
         if (!isset($this->aeadContexts[$level])) {
             // 如果上下文未初始化，尝试初始化
             $this->setLevel($level);
         }
-        
+
         $direction = $this->isServer ? 'server' : 'client';
         $context = $this->aeadContexts[$level][$direction] ?? null;
-        
-        if (!$context || !isset($context['keys']['iv']) || !$context['keys']['iv']) {
+
+        if (null === $context || !isset($context['keys']['iv']) || '' === $context['keys']['iv']) {
             // 创建默认密钥
             $this->setDefaultKeys($level);
             $context = $this->aeadContexts[$level][$direction];
         }
-        
+
         $keys = $context['keys'];
-        
+
         // 获取并递增序列号
         $seqNum = $this->sequenceNumbers[$level][$direction]++;
-        
+
         // 计算 nonce（IV XOR 序列号）
         $nonce = $this->computeNonce($keys['iv'], $seqNum);
-        
+
         // 执行 AEAD 加密
         $ciphertext = openssl_encrypt(
             $plaintext,
@@ -214,55 +215,55 @@ class CryptoManager
             $associatedData,
             16 // tag length
         );
-        
-        if ($ciphertext === false) {
-            throw new TlsProtocolException("加密失败: " . openssl_error_string());
+
+        if (false === $ciphertext) {
+            throw new TlsProtocolException('加密失败: ' . openssl_error_string());
         }
-        
+
         return $ciphertext . $tag;
     }
-    
+
     /**
      * 解密数据
      */
     public function decrypt(string $ciphertext, string $level, string $associatedData): string
     {
         // 验证级别是否有效
-        if (!in_array($level, ['initial', 'handshake', 'application'])) {
-            throw new TlsProtocolException("级别 $level 的加密上下文未初始化");
+        if (!in_array($level, ['initial', 'handshake', 'application'], true)) {
+            throw new TlsProtocolException("级别 {$level} 的加密上下文未初始化");
         }
-        
+
         if (!isset($this->aeadContexts[$level])) {
             // 如果上下文未初始化，尝试初始化
             $this->setLevel($level);
         }
-        
+
         if (strlen($ciphertext) < 16) {
-            throw new InvalidParameterException("密文太短");
+            throw new InvalidParameterException('密文太短');
         }
-        
+
         // 解密时使用对方的密钥：server解密用client密钥，client解密用server密钥
         $direction = $this->isServer ? 'client' : 'server';
         $context = $this->aeadContexts[$level][$direction] ?? null;
-        
-        if (!$context || !isset($context['keys']['iv']) || !$context['keys']['iv']) {
+
+        if (null === $context || !isset($context['keys']['iv']) || '' === $context['keys']['iv']) {
             // 创建默认密钥
             $this->setDefaultKeys($level);
             $context = $this->aeadContexts[$level][$direction];
         }
-        
+
         $keys = $context['keys'];
-        
+
         // 分离密文和认证标签
         $tag = substr($ciphertext, -16);
         $actualCiphertext = substr($ciphertext, 0, -16);
-        
+
         // 获取并递增序列号
         $seqNum = $this->sequenceNumbers[$level][$direction]++;
-        
+
         // 计算 nonce
         $nonce = $this->computeNonce($keys['iv'], $seqNum);
-        
+
         // 执行 AEAD 解密
         $plaintext = openssl_decrypt(
             $actualCiphertext,
@@ -273,52 +274,47 @@ class CryptoManager
             $tag,
             $associatedData
         );
-        
-        if ($plaintext === false) {
-            throw new TlsProtocolException("解密失败: " . openssl_error_string());
+
+        if (false === $plaintext) {
+            throw new TlsProtocolException('解密失败: ' . openssl_error_string());
         }
-        
+
         return $plaintext;
     }
-    
+
     /**
      * 计算 nonce
      */
     private function computeNonce(string $iv, int $sequenceNumber): string
     {
-        $nonce = $iv;
         $seqBytes = pack('J', $sequenceNumber); // 64-bit big-endian
-        
+
         // XOR 序列号到 IV 的最后 8 字节
-        for ($i = 0; $i < 8; $i++) {
-            $nonce[strlen($nonce) - 8 + $i] = $nonce[strlen($nonce) - 8 + $i] ^ $seqBytes[$i];
-        }
-        
-        return $nonce;
+        return substr($iv, 0, -8) . substr($iv, -8) ^ $seqBytes;
     }
-    
+
     /**
      * 设置加密级别
      */
     public function setLevel(string $level): void
     {
         $this->currentLevel = $level;
-        
+
         // 如果该级别的上下文未初始化，使用默认值
         if (!isset($this->aeadContexts[$level])) {
             $this->setDefaultKeys($level);
         }
     }
-    
+
     /**
      * 设置默认密钥（用于测试）
      */
     private function setDefaultKeys(string $level): void
     {
-        $method = $this->cipherSuites['TLS_AES_128_GCM_SHA256']['method'] ?? 'aes-128-gcm';
+        $method = 'aes-128-gcm'; // 默认使用 TLS_AES_128_GCM_SHA256
         $keyLen = 16; // AES-128
         $ivLen = 12;  // GCM IV length
-        
+
         $this->aeadContexts[$level] = [
             'client' => [
                 'method' => $method,
@@ -335,10 +331,10 @@ class CryptoManager
                 ],
             ],
         ];
-        
+
         $this->sequenceNumbers[$level] = ['client' => 0, 'server' => 0];
     }
-    
+
     /**
      * 获取当前加密级别
      */
@@ -346,9 +342,10 @@ class CryptoManager
     {
         return $this->currentLevel;
     }
-    
+
     /**
      * 获取密码套件信息
+     * @return array<string, mixed>
      */
     public function getCipherInfo(): array
     {
@@ -357,10 +354,10 @@ class CryptoManager
                 return $suite;
             }
         }
-        
+
         throw new TlsProtocolException("未知的密码套件: {$this->cipherSuite}");
     }
-    
+
     /**
      * 获取 OpenSSL 方法名
      */
@@ -373,26 +370,26 @@ class CryptoManager
             default => throw new TlsProtocolException("不支持的密码套件: {$this->cipherSuite}"),
         };
     }
-    
+
     /**
      * 更新密钥（密钥更新）
      */
     public function updateKeys(): void
     {
         // 只允许在应用级别更新密钥
-        if ($this->currentLevel !== 'application') {
-            throw new TlsProtocolException("只能在应用级别更新密钥");
+        if ('application' !== $this->currentLevel) {
+            throw new TlsProtocolException('只能在应用级别更新密钥');
         }
-        
+
         $this->keyScheduler->updateKeys();
-        
+
         // 重新派生应用密钥
         $newSecrets = $this->keyScheduler->getApplicationSecrets();
-        if (isset($newSecrets['client']) && isset($newSecrets['server'])) {
+        if (isset($newSecrets['client'], $newSecrets['server'])) {
             $this->setApplicationSecrets($newSecrets['client'], $newSecrets['server']);
         }
     }
-    
+
     /**
      * 重置序列号（用于密钥更新后）
      */
@@ -400,7 +397,7 @@ class CryptoManager
     {
         $this->sequenceNumbers[$level] = ['client' => 0, 'server' => 0];
     }
-    
+
     /**
      * 获取密钥调度器（用于导出密钥等高级操作）
      */

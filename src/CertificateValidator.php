@@ -4,9 +4,12 @@ declare(strict_types=1);
 
 namespace Tourze\QUIC\TLS;
 
-use OpenSSLAsymmetricKey;
-use Tourze\QUIC\TLS\Exception\InvalidCertificateException;
 use Tourze\QUIC\TLS\Exception\CertificateValidationException;
+use Tourze\QUIC\TLS\Exception\InvalidCertificateException;
+use Tourze\QUIC\TLS\Validator\CALoader;
+use Tourze\QUIC\TLS\Validator\CertificateChainValidator;
+use Tourze\QUIC\TLS\Validator\CertificateParser;
+use Tourze\QUIC\TLS\Validator\HostnameValidator;
 
 /**
  * 证书验证器
@@ -16,43 +19,76 @@ use Tourze\QUIC\TLS\Exception\CertificateValidationException;
 class CertificateValidator
 {
     private ?string $serverCertificate = null;
-    private ?OpenSSLAsymmetricKey $serverPrivateKey = null;
-    private array $trustedCAs = [];
+
+    private ?\OpenSSLAsymmetricKey $serverPrivateKey = null;
+
     private bool $verifyPeer = true;
+
     private bool $verifyPeerName = true;
+
     private bool $allowSelfSigned = false;
+
     private int $verifyDepth = 7;
+
     private bool $disableCompression = true;
+
     private string $caFile = '';
+
     private bool $checkRevocation = false;
 
+    private CertificateChainValidator $chainValidator;
+
+    private HostnameValidator $hostnameValidator;
+
+    private CertificateParser $parser;
+
+    private CALoader $caLoader;
+
+    /**
+     * @param array<string, mixed> $options
+     */
     public function __construct(array $options = [])
     {
         $this->serverCertificate = $options['server_cert'] ?? null;
-        if (isset($options['ca_cert'])) {
-            $this->addTrustedCA($options['ca_cert']);
-        }
         $this->verifyPeer = $options['verify_peer'] ?? true;
         $this->verifyPeerName = $options['verify_peer_name'] ?? true;
         $this->allowSelfSigned = $options['allow_self_signed'] ?? false;
         $this->verifyDepth = $options['verify_depth'] ?? 7;
         $this->disableCompression = $options['disable_compression'] ?? true;
-        $this->caFile = $options['ca_file'] ?? $this->loadSystemCACertificates();
         $this->checkRevocation = $options['check_revocation'] ?? false;
-        
+
+        $this->caLoader = new CALoader();
+        if (isset($options['ca_cert'])) {
+            $this->caLoader->addTrustedCA($options['ca_cert']);
+        }
+        $this->caFile = $options['ca_file'] ?? $this->caLoader->getSystemCACertificatePath();
+        $this->caLoader->loadSystemCAs();
+
+        $this->chainValidator = new CertificateChainValidator(
+            $this->caLoader->getTrustedCAs(),
+            $this->allowSelfSigned,
+            $this->verifyDepth
+        );
+        $this->hostnameValidator = new HostnameValidator($this->verifyPeerName);
+        $this->parser = new CertificateParser();
+
         if (isset($options['server_key'])) {
             try {
-                $this->serverPrivateKey = openssl_pkey_get_private($options['server_key']);
+                $key = openssl_pkey_get_private($options['server_key']);
+                if (false === $key) {
+                    throw new InvalidCertificateException('无效的服务器私钥');
+                }
+                $this->serverPrivateKey = $key;
             } catch (\Throwable $e) {
                 throw new InvalidCertificateException('无效的服务器私钥: ' . $e->getMessage(), previous: $e);
             }
         }
-        
-        $this->loadSystemCAs();
     }
 
     /**
      * 获取配置
+     *
+     * @return array<string, mixed>
      */
     public function getConfig(): array
     {
@@ -69,150 +105,30 @@ class CertificateValidator
 
     /**
      * 验证证书链
+     *
+     * @param array<int, string> $certificateChain
      */
     public function validateCertificate(array $certificateChain): bool
     {
-        // 如果不需要对等验证，直接返回true
         if (!$this->verifyPeer) {
             return true;
         }
 
-        if (empty($certificateChain)) {
+        if ([] === $certificateChain) {
             return false;
         }
 
         $leafCert = $certificateChain[0];
-        
-        // 解析叶子证书
         $certInfo = openssl_x509_parse($leafCert);
-        if ($certInfo === false) {
+        if (false === $certInfo) {
             return false;
         }
 
-        // 检查证书有效期
-        if (!$this->checkCertificateValidity($certInfo)) {
+        if (!$this->parser->checkCertificateValidity($certInfo)) {
             return false;
         }
 
-        // 验证证书链
-        return $this->verifyCertificateChain($certificateChain);
-    }
-
-    /**
-     * 验证证书链
-     */
-    private function verifyCertificateChain(array $certificateChain): bool
-    {
-        $chainLength = count($certificateChain);
-        
-        if ($chainLength > $this->verifyDepth) {
-            return false;
-        }
-
-        // 如果只有一个证书
-        if ($chainLength === 1) {
-            $cert = $certificateChain[0];
-            
-            // 先尝试验证是否是自签名证书
-            $isSelfSigned = $this->verifySelfSignedCertificate($cert);
-            
-            if ($isSelfSigned) {
-                // 是自签名证书，检查是否允许
-                return $this->allowSelfSigned;
-            } else {
-                // 不是自签名证书，尝试在受信任的CA中查找
-                return $this->verifyRootCertificate($cert);
-            }
-        }
-
-        // 验证链中每个证书
-        for ($i = 0; $i < $chainLength - 1; $i++) {
-            $currentCert = $certificateChain[$i];
-            $issuerCert = $certificateChain[$i + 1];
-            
-            if (!$this->verifyCertificateSignature($currentCert, $issuerCert)) {
-                return false;
-            }
-        }
-
-        // 验证根证书
-        $rootCert = $certificateChain[$chainLength - 1];
-        return $this->verifyRootCertificate($rootCert);
-    }
-
-    /**
-     * 验证证书签名
-     */
-    private function verifyCertificateSignature(string $cert, string $issuerCert): bool
-    {
-        $pubKey = openssl_pkey_get_public($issuerCert);
-        if ($pubKey === false) {
-            return false;
-        }
-
-        $result = openssl_x509_verify($cert, $pubKey);
-        
-        return $result === 1;
-    }
-
-    /**
-     * 验证自签名证书
-     */
-    private function verifySelfSignedCertificate(string $cert): bool
-    {
-        $pubKey = openssl_pkey_get_public($cert);
-        if ($pubKey === false) {
-            return false;
-        }
-
-        return openssl_x509_verify($cert, $pubKey) === 1;
-    }
-
-    /**
-     * 验证根证书
-     */
-    private function verifyRootCertificate(string $rootCert): bool
-    {
-        // 检查是否在受信任的CA列表中
-        foreach ($this->trustedCAs as $trustedCA) {
-            if ($this->compareCertificates($rootCert, $trustedCA)) {
-                return true;
-            }
-        }
-
-        // 检查是否为自签名的根证书
-        return $this->verifySelfSignedCertificate($rootCert);
-    }
-
-    /**
-     * 比较两个证书是否相同
-     */
-    private function compareCertificates(string $cert1, string $cert2): bool
-    {
-        $fingerprint1 = openssl_x509_fingerprint($cert1, 'sha256');
-        $fingerprint2 = openssl_x509_fingerprint($cert2, 'sha256');
-        
-        return $fingerprint1 === $fingerprint2;
-    }
-
-    /**
-     * 检查证书有效期
-     */
-    private function checkCertificateValidity(array $certInfo): bool
-    {
-        $now = time();
-        
-        // 检查证书是否已过期
-        if (isset($certInfo['validTo_time_t']) && $certInfo['validTo_time_t'] < $now) {
-            return false;
-        }
-        
-        // 检查证书是否还未生效
-        if (isset($certInfo['validFrom_time_t']) && $certInfo['validFrom_time_t'] > $now) {
-            return false;
-        }
-        
-        return true;
+        return $this->chainValidator->validateChain($certificateChain);
     }
 
     /**
@@ -220,22 +136,22 @@ class CertificateValidator
      */
     public function verifyTranscriptSignature(string $transcriptHash, string $signature): bool
     {
-        if ($this->serverCertificate === null) {
+        if (null === $this->serverCertificate) {
             return false;
         }
 
         $pubKey = openssl_pkey_get_public($this->serverCertificate);
-        if ($pubKey === false) {
+        if (false === $pubKey) {
             return false;
         }
 
         // 构造TLS 1.3签名上下文
-        $contextString = str_repeat(chr(0x20), 64) . 
-                        "TLS 1.3, server CertificateVerify" . 
-                        chr(0) . 
+        $contextString = str_repeat(chr(0x20), 64) .
+                        'TLS 1.3, server CertificateVerify' .
+                        chr(0) .
                         $transcriptHash;
 
-        return openssl_verify($contextString, $signature, $pubKey, OPENSSL_ALGO_SHA256) === 1;
+        return 1 === openssl_verify($contextString, $signature, $pubKey, OPENSSL_ALGO_SHA256);
     }
 
     /**
@@ -243,18 +159,18 @@ class CertificateValidator
      */
     public function signTranscript(string $transcriptHash): string
     {
-        if ($this->serverPrivateKey === null) {
+        if (null === $this->serverPrivateKey) {
             throw new CertificateValidationException('服务器私钥未设置');
         }
 
         // 构造TLS 1.3签名上下文
-        $contextString = str_repeat(chr(0x20), 64) . 
-                        "TLS 1.3, server CertificateVerify" . 
-                        chr(0) . 
+        $contextString = str_repeat(chr(0x20), 64) .
+                        'TLS 1.3, server CertificateVerify' .
+                        chr(0) .
                         $transcriptHash;
 
         $signature = '';
-        if (openssl_sign($contextString, $signature, $this->serverPrivateKey, OPENSSL_ALGO_SHA256) === false) {
+        if (false === openssl_sign($contextString, $signature, $this->serverPrivateKey, OPENSSL_ALGO_SHA256)) {
             throw new CertificateValidationException('签名失败');
         }
 
@@ -266,7 +182,7 @@ class CertificateValidator
      */
     public function hasServerCertificate(): bool
     {
-        return $this->serverCertificate !== null;
+        return null !== $this->serverCertificate;
     }
 
     /**
@@ -292,9 +208,13 @@ class CertificateValidator
     public function setServerCertificate(string $certificate, string $privateKey = ''): void
     {
         $this->serverCertificate = $certificate;
-        if ($privateKey !== '') {
+        if ('' !== $privateKey) {
             try {
-                $this->serverPrivateKey = openssl_pkey_get_private($privateKey);
+                $key = openssl_pkey_get_private($privateKey);
+                if (false === $key) {
+                    throw new InvalidCertificateException('无效的私钥');
+                }
+                $this->serverPrivateKey = $key;
             } catch (\Throwable $e) {
                 throw new InvalidCertificateException('无效的私钥: ' . $e->getMessage());
             }
@@ -307,7 +227,11 @@ class CertificateValidator
     public function setServerPrivateKey(string $privateKey): void
     {
         try {
-            $this->serverPrivateKey = openssl_pkey_get_private($privateKey);
+            $key = openssl_pkey_get_private($privateKey);
+            if (false === $key) {
+                throw new InvalidCertificateException('无效的私钥');
+            }
+            $this->serverPrivateKey = $key;
         } catch (\Throwable $e) {
             throw new InvalidCertificateException('无效的私钥: ' . $e->getMessage());
         }
@@ -318,215 +242,93 @@ class CertificateValidator
      */
     public function addTrustedCA(string $caCertificate): void
     {
-        $this->trustedCAs[] = $caCertificate;
-    }
-
-    /**
-     * 加载系统CA证书
-     */
-    private function loadSystemCAs(): void
-    {
-        // 尝试加载系统CA包
-        $caBundlePaths = [
-            '/etc/ssl/certs/ca-certificates.crt', // Debian/Ubuntu
-            '/etc/pki/tls/certs/ca-bundle.crt',   // CentOS/RHEL
-            '/etc/ssl/ca-bundle.pem',             // OpenSUSE
-            '/usr/local/share/certs/ca-root-nss.crt', // FreeBSD
-        ];
-
-        foreach ($caBundlePaths as $path) {
-            if (file_exists($path) && is_readable($path)) {
-                $this->loadCABundle($path);
-                break;
-            }
-        }
-    }
-
-    /**
-     * 加载CA证书包
-     */
-    private function loadCABundle(string $path): void
-    {
-        $caData = file_get_contents($path);
-        if ($caData === false) {
-            return;
-        }
-
-        // 解析PEM格式的CA证书包
-        $certificates = [];
-        if (preg_match_all('/-----BEGIN CERTIFICATE-----.*?-----END CERTIFICATE-----/s', $caData, $matches)) {
-            $certificates = $matches[0];
-        }
-
-        $this->trustedCAs = array_merge($this->trustedCAs, $certificates);
+        $this->caLoader->addTrustedCA($caCertificate);
     }
 
     /**
      * 验证证书链的完整性
+     *
+     * @param array<int, string> $certificateChain
      */
     public function validateCertificateChain(array $certificateChain, ?string $hostname = null): bool
     {
-        if (empty($certificateChain)) {
+        if ([] === $certificateChain) {
             return false;
         }
 
-        // 对于单个证书的情况，特殊处理
-        if (count($certificateChain) === 1) {
-            $cert = $certificateChain[0];
-            
-            // 解析证书
-            $certInfo = openssl_x509_parse($cert);
-            if ($certInfo === false) {
-                return false;
-            }
+        if (1 === count($certificateChain)) {
+            return $this->validateSingleCertificate($certificateChain[0], $hostname);
+        }
 
-            // 检查证书有效期
-            if (!$this->checkCertificateValidity($certInfo)) {
-                return false;
-            }
+        return $this->validateMultipleCertificates($certificateChain, $hostname);
+    }
 
-            // 如果不需要验证对等方，则直接返回true
-            if (!$this->verifyPeer) {
-                return true;
-            }
+    /**
+     * 验证单个证书
+     */
+    private function validateSingleCertificate(string $cert, ?string $hostname): bool
+    {
+        $certInfo = openssl_x509_parse($cert);
+        if (false === $certInfo || !$this->parser->checkCertificateValidity($certInfo)) {
+            return false;
+        }
 
-            // 如果允许自签名证书，验证它是否是自签名的
-            if ($this->allowSelfSigned) {
-                if (!$this->verifySelfSignedCertificate($cert)) {
-                    return false;
-                }
-            }
-            
-            // 验证主机名（如果提供）
-            if ($hostname !== null && !$this->validateHostname($cert, $hostname)) {
-                return false;
-            }
-            
+        if (!$this->verifyPeer) {
             return true;
         }
 
-        // 多个证书的情况 - 检查是否有重复
-        $fingerprints = [];
-        foreach ($certificateChain as $cert) {
-            $fingerprint = openssl_x509_fingerprint($cert, 'sha256');
-            if ($fingerprint === false) {
-                return false;
-            }
-            if (in_array($fingerprint, $fingerprints)) {
-                // 发现重复的证书
-                return false;
-            }
-            $fingerprints[] = $fingerprint;
-        }
+        // 对于单个证书，允许自签名证书通过验证
+        $tempChainValidator = new CertificateChainValidator(
+            $this->caLoader->getTrustedCAs(),
+            true, // 临时允许自签名
+            $this->verifyDepth
+        );
 
-        // 验证证书链中的每个证书的有效期
-        foreach ($certificateChain as $cert) {
-            $certInfo = openssl_x509_parse($cert);
-            if ($certInfo === false) {
-                return false;
-            }
-            if (!$this->checkCertificateValidity($certInfo)) {
-                return false;
-            }
-        }
-
-        // 验证证书链中的签名关系
-        $chainLength = count($certificateChain);
-        for ($i = 0; $i < $chainLength - 1; $i++) {
-            $currentCert = $certificateChain[$i];
-            $issuerCert = $certificateChain[$i + 1];
-            
-            if (!$this->verifyCertificateSignature($currentCert, $issuerCert)) {
-                return false;
-            }
-        }
-
-        // 验证根证书
-        $rootCert = $certificateChain[$chainLength - 1];
-        if (!$this->verifyRootCertificate($rootCert)) {
+        if (!$tempChainValidator->validateChain([$cert])) {
             return false;
         }
 
-        // 验证主机名（如果提供）
-        if ($hostname !== null) {
-            return $this->validateHostname($certificateChain[0], $hostname);
+        if (null !== $hostname) {
+            return $this->hostnameValidator->validateHostname($cert, $hostname);
         }
 
         return true;
     }
 
     /**
-     * 验证证书的主机名
+     * 验证多个证书
+     *
+     * @param array<int, string> $certificateChain
      */
-    private function validateHostname(string $certificate, string $hostname): bool
+    private function validateMultipleCertificates(array $certificateChain, ?string $hostname): bool
     {
-        $certInfo = openssl_x509_parse($certificate);
-        if ($certInfo === false) {
+        if ($this->parser->checkDuplicateCertificates($certificateChain)) {
             return false;
         }
 
-        // 检查CN字段
-        if (isset($certInfo['subject']['CN'])) {
-            if ($this->matchHostname($certInfo['subject']['CN'], $hostname)) {
-                return true;
-            }
+        if (!$this->parser->validateAllCertificatesDates($certificateChain)) {
+            return false;
         }
 
-        // 检查SAN扩展
-        if (isset($certInfo['extensions']['subjectAltName'])) {
-            $sanList = explode(',', $certInfo['extensions']['subjectAltName']);
-            foreach ($sanList as $san) {
-                $san = trim($san);
-                if (strpos($san, 'DNS:') === 0) {
-                    $dnsName = substr($san, 4);
-                    if ($this->matchHostname($dnsName, $hostname)) {
-                        return true;
-                    }
-                }
-            }
+        if (!$this->chainValidator->validateChain($certificateChain)) {
+            return false;
         }
 
-        return false;
-    }
-
-    /**
-     * 匹配主机名（支持通配符）
-     */
-    private function matchHostname(string $pattern, string $hostname): bool
-    {
-        // 如果模式包含通配符
-        if (strpos($pattern, '*') !== false) {
-            // 转换为正则表达式
-            $regex = '/^' . str_replace(['*', '.'], ['[^.]*', '\.'], $pattern) . '$/i';
-            return preg_match($regex, $hostname) === 1;
+        if (null !== $hostname) {
+            return $this->hostnameValidator->validateHostname($certificateChain[0], $hostname);
         }
 
-        // 精确匹配
-        return strcasecmp($pattern, $hostname) === 0;
+        return true;
     }
 
     /**
      * 获取证书信息
+     *
+     * @return array<string, mixed>
      */
     public function getCertificateInfo(string $certificate): array
     {
-        $info = openssl_x509_parse($certificate);
-        if ($info === false) {
-            throw new InvalidCertificateException('无法解析证书');
-        }
-
-        // 添加额外的字段以满足测试需求
-        if (isset($info['validFrom_time_t'])) {
-            $info['valid_from'] = date('Y-m-d H:i:s', $info['validFrom_time_t']);
-        }
-        if (isset($info['validTo_time_t'])) {
-            $info['valid_to'] = date('Y-m-d H:i:s', $info['validTo_time_t']);
-        }
-        if (isset($info['serialNumber'])) {
-            $info['serial_number'] = $info['serialNumber'];
-        }
-
-        return $info;
+        return $this->parser->getCertificateInfo($certificate);
     }
 
     /**
@@ -538,115 +340,71 @@ class CertificateValidator
         // 简化实现，总是返回false
         return false;
     }
-    
+
     /**
      * 加载系统 CA 证书
      */
     public function loadSystemCACertificates(): string
     {
-        // 尝试常见的 CA 证书路径
-        $commonPaths = [
-            '/etc/ssl/certs/ca-certificates.crt',
-            '/etc/pki/tls/certs/ca-bundle.crt',
-            '/usr/share/ssl/certs/ca-bundle.crt',
-            '/usr/local/share/certs/ca-root-nss.crt',
-            '/etc/ssl/cert.pem'
-        ];
-        
-        foreach ($commonPaths as $path) {
-            if (file_exists($path)) {
-                return $path;
-            }
-        }
-        
-        return '';
+        return $this->caLoader->getSystemCACertificatePath();
     }
-    
+
     /**
      * 获取证书指纹
      */
     public function getCertificateFingerprint(string $certificate): string
     {
-        $x509 = openssl_x509_read($certificate);
-        if ($x509 === false) {
-            throw new InvalidCertificateException('无法解析证书');
-        }
-        
-        openssl_x509_export($x509, $pem);
-        return hash('sha256', $pem);
+        return $this->parser->getCertificateFingerprint($certificate);
     }
-    
+
     /**
      * 主机名验证
      */
     public function verifyHostname(string $certificate, string $hostname): bool
     {
-        if (!$this->verifyPeerName) {
-            return true;
-        }
-        
-        $info = $this->getCertificateInfo($certificate);
-        
-        // 检查 CN
-        if (isset($info['subject']['CN']) && $this->matchHostname($info['subject']['CN'], $hostname)) {
-            return true;
-        }
-        
-        // 检查 SAN
-        if (isset($info['extensions']['subjectAltName'])) {
-            $sans = explode(', ', $info['extensions']['subjectAltName']);
-            foreach ($sans as $san) {
-                if (strpos($san, 'DNS:') === 0) {
-                    $dnsName = substr($san, 4);
-                    if ($this->matchHostname($dnsName, $hostname)) {
-                        return true;
-                    }
-                }
-            }
-        }
-        
-        return false;
+        return $this->hostnameValidator->validateHostname($certificate, $hostname);
     }
-    
+
     /**
      * 通配符匹配
      */
     public function matchesWildcard(string $hostname, string $pattern): bool
     {
-        return $this->matchHostname($pattern, $hostname);
+        return $this->hostnameValidator->matchesWildcard($hostname, $pattern);
     }
-    
+
     /**
      * 签名数据
      */
     public function signData(string $data, string $privateKey): string
     {
         $key = openssl_pkey_get_private($privateKey);
-        if ($key === false) {
+        if (false === $key) {
             throw new InvalidCertificateException('无效的私钥');
         }
-        
+
         $signature = '';
         $result = openssl_sign($data, $signature, $key, OPENSSL_ALGO_SHA256);
-        
+
         if (!$result) {
             throw new CertificateValidationException('签名失败');
         }
-        
+
         return $signature;
     }
-    
+
     /**
      * 验证签名
      */
     public function verifySignature(string $data, string $signature, string $certificate): bool
     {
         $publicKey = openssl_pkey_get_public($certificate);
-        if ($publicKey === false) {
+        if (false === $publicKey) {
             return false;
         }
-        
+
         $result = openssl_verify($data, $signature, $publicKey, OPENSSL_ALGO_SHA256);
-        return $result === 1;
+
+        return 1 === $result;
     }
 }

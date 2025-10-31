@@ -4,15 +4,22 @@ declare(strict_types=1);
 
 namespace Tourze\QUIC\TLS\Tests;
 
+use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
 use Tourze\QUIC\TLS\CertificateValidator;
 
-class CertificateValidatorTest extends TestCase
+/**
+ * @internal
+ */
+#[CoversClass(CertificateValidator::class)]
+final class CertificateValidatorTest extends TestCase
 {
     private CertificateValidator $validator;
+
     private string $testCertPem = '';
+
     private string $testPrivateKeyPem = '';
-    
+
     public function testDefaultConfiguration(): void
     {
         $config = $this->validator->getConfig();
@@ -24,7 +31,7 @@ class CertificateValidatorTest extends TestCase
         $this->assertTrue($config['disable_compression']);
         $this->assertNotEmpty($config['ca_file']);
     }
-    
+
     public function testCustomConfiguration(): void
     {
         $customConfig = [
@@ -40,7 +47,7 @@ class CertificateValidatorTest extends TestCase
         $this->assertTrue($config['allow_self_signed']);
         $this->assertEquals(3, $config['verify_depth']);
     }
-    
+
     public function testSelfSignedCertificateValidation(): void
     {
         $validator = new CertificateValidator([
@@ -53,7 +60,7 @@ class CertificateValidatorTest extends TestCase
 
         $this->assertTrue($result);
     }
-    
+
     public function testSelfSignedCertificateRejection(): void
     {
         $validator = new CertificateValidator([
@@ -66,7 +73,7 @@ class CertificateValidatorTest extends TestCase
 
         $this->assertFalse($result);
     }
-    
+
     public function testCertificateChainValidation(): void
     {
         $validator = new CertificateValidator([
@@ -79,26 +86,26 @@ class CertificateValidatorTest extends TestCase
 
         $this->assertTrue($result);
     }
-    
+
     public function testInvalidCertificateFormat(): void
     {
         $validator = new CertificateValidator([
             'allow_self_signed' => true,
         ]);
 
-        $invalidCert = "INVALID CERTIFICATE DATA";
+        $invalidCert = 'INVALID CERTIFICATE DATA';
         $certificates = [$invalidCert];
 
         $result = $validator->validateCertificate($certificates);
         $this->assertFalse($result);
     }
-    
+
     public function testEmptyCertificateArray(): void
     {
         $result = $this->validator->validateCertificate([]);
         $this->assertFalse($result);
     }
-    
+
     public function testCertificateExpiration(): void
     {
         // 创建一个已过期的证书（这里模拟测试）
@@ -113,7 +120,7 @@ class CertificateValidatorTest extends TestCase
         // 新创建的证书应该是有效的
         $this->assertTrue($result);
     }
-    
+
     public function testHostnameVerification(): void
     {
         $validator = new CertificateValidator([
@@ -127,7 +134,7 @@ class CertificateValidatorTest extends TestCase
         // 我们的测试证书不是为 example.com 签发的，所以应该失败
         $this->assertFalse($result);
     }
-    
+
     public function testHostnameVerificationDisabled(): void
     {
         $validator = new CertificateValidator([
@@ -141,7 +148,7 @@ class CertificateValidatorTest extends TestCase
         // 禁用主机名验证时应该返回 true
         $this->assertTrue($result);
     }
-    
+
     public function testWildcardHostnameMatching(): void
     {
         $validator = new CertificateValidator();
@@ -155,7 +162,7 @@ class CertificateValidatorTest extends TestCase
         // 多级通配符应该不匹配
         $this->assertFalse($validator->matchesWildcard('deep.sub.example.com', '*.example.com'));
     }
-    
+
     public function testSignatureVerification(): void
     {
         $validator = new CertificateValidator([
@@ -170,7 +177,7 @@ class CertificateValidatorTest extends TestCase
         $verified = $validator->verifySignature($data, $signature, $this->testCertPem);
         $this->assertTrue($verified);
     }
-    
+
     public function testInvalidSignatureVerification(): void
     {
         $validator = new CertificateValidator([
@@ -183,7 +190,7 @@ class CertificateValidatorTest extends TestCase
         $verified = $validator->verifySignature($data, $invalidSignature, $this->testCertPem);
         $this->assertFalse($verified);
     }
-    
+
     public function testTranscriptSignature(): void
     {
         $validator = new CertificateValidator([
@@ -201,7 +208,7 @@ class CertificateValidatorTest extends TestCase
         $verified = $validator->verifyTranscriptSignature($transcriptHash, $signature);
         $this->assertTrue($verified);
     }
-    
+
     public function testCertificateInfo(): void
     {
         $info = $this->validator->getCertificateInfo($this->testCertPem);
@@ -212,17 +219,17 @@ class CertificateValidatorTest extends TestCase
         $this->assertArrayHasKey('valid_to', $info);
         $this->assertArrayHasKey('serial_number', $info);
     }
-    
+
     public function testLoadSystemCACertificates(): void
     {
         $caPath = $this->validator->loadSystemCACertificates();
 
         // 应该返回一个有效的 CA 文件路径或空字符串
-        if (!empty($caPath)) {
+        if ('' !== $caPath) {
             $this->assertFileExists($caPath);
         }
     }
-    
+
     public function testCertificateFingerprint(): void
     {
         $fingerprint = $this->validator->getCertificateFingerprint($this->testCertPem);
@@ -230,7 +237,7 @@ class CertificateValidatorTest extends TestCase
         $this->assertNotEmpty($fingerprint);
         $this->assertMatchesRegularExpression('/^[a-f0-9]{64}$/', $fingerprint); // SHA256 hex
     }
-    
+
     public function testCertificateChainOrder(): void
     {
         // 测试证书链的正确顺序
@@ -239,7 +246,7 @@ class CertificateValidatorTest extends TestCase
         $result = $this->validator->validateCertificateChain($certificates);
         $this->assertTrue($result);
     }
-    
+
     public function testPeerValidationDisabled(): void
     {
         $validator = new CertificateValidator([
@@ -250,7 +257,7 @@ class CertificateValidatorTest extends TestCase
         $result = $validator->validateCertificate(['invalid cert']);
         $this->assertTrue($result);
     }
-    
+
     public function testCertificateRevocation(): void
     {
         // 注意：真实的 CRL 检查需要网络访问，这里只测试接口
@@ -265,7 +272,7 @@ class CertificateValidatorTest extends TestCase
         // 禁用撤销检查时，有效证书应该通过
         $this->assertTrue($result);
     }
-    
+
     public function testMultipleCertificatesInChain(): void
     {
         $validator = new CertificateValidator([
@@ -280,15 +287,174 @@ class CertificateValidatorTest extends TestCase
         // 这种情况下应该失败，因为同一个证书重复了
         $this->assertFalse($result);
     }
-    
+
+    public function testAddTrustedCA(): void
+    {
+        $validator = new CertificateValidator();
+
+        // 测试添加受信任的 CA 证书
+        $validator->addTrustedCA($this->testCertPem);
+
+        // 验证 CA 证书已被添加（通过反射检查 CALoader 的内部状态）
+        $reflection = new \ReflectionClass($validator);
+        $caLoaderProp = $reflection->getProperty('caLoader');
+        $caLoaderProp->setAccessible(true);
+        $caLoader = $caLoaderProp->getValue($validator);
+
+        // 检查 CALoader 中的受信任CA列表
+        $caReflection = new \ReflectionClass($caLoader);
+        $trustedCAsProp = $caReflection->getProperty('trustedCAs');
+        $trustedCAsProp->setAccessible(true);
+        $trustedCAs = $trustedCAsProp->getValue($caLoader);
+
+        $this->assertIsArray($trustedCAs);
+        $this->assertContains($this->testCertPem, $trustedCAs);
+    }
+
+    public function testRequiresCertificate(): void
+    {
+        // 默认配置需要证书验证
+        $validator = new CertificateValidator();
+        $this->assertTrue($validator->requiresCertificate());
+
+        // 禁用对等验证时不需要证书
+        $validator = new CertificateValidator(['verify_peer' => false]);
+        $this->assertFalse($validator->requiresCertificate());
+    }
+
+    public function testSignData(): void
+    {
+        $validator = new CertificateValidator();
+        $data = 'test data to sign';
+
+        $signature = $validator->signData($data, $this->testPrivateKeyPem);
+
+        $this->assertNotEmpty($signature);
+        $this->assertIsString($signature);
+    }
+
+    public function testVerifyTranscriptSignature(): void
+    {
+        $validator = new CertificateValidator([
+            'allow_self_signed' => true,
+        ]);
+
+        // 设置服务器证书
+        $validator->setServerCertificate($this->testCertPem, $this->testPrivateKeyPem);
+
+        $transcriptHash = hash('sha256', 'test transcript', true);
+        $signature = $validator->signTranscript($transcriptHash);
+
+        $result = $validator->verifyTranscriptSignature($transcriptHash, $signature);
+        $this->assertTrue($result);
+
+        // 测试错误的签名
+        $result = $validator->verifyTranscriptSignature($transcriptHash, 'invalid_signature');
+        $this->assertFalse($result);
+    }
+
+    public function testSignTranscript(): void
+    {
+        $validator = new CertificateValidator([
+            'allow_self_signed' => true,
+        ]);
+
+        // 设置服务器证书和私钥
+        $validator->setServerCertificate($this->testCertPem, $this->testPrivateKeyPem);
+
+        $transcriptHash = hash('sha256', 'test transcript', true);
+        $signature = $validator->signTranscript($transcriptHash);
+
+        $this->assertNotEmpty($signature);
+        $this->assertIsString($signature);
+    }
+
+    public function testMatchesWildcard(): void
+    {
+        $validator = new CertificateValidator();
+
+        // 测试通配符匹配逻辑
+        $this->assertFalse($validator->matchesWildcard('example.com', '*.example.com'));
+        $this->assertTrue($validator->matchesWildcard('sub.example.com', '*.example.com'));
+        $this->assertFalse($validator->matchesWildcard('example.com', '*.sub.example.com'));
+        $this->assertFalse($validator->matchesWildcard('other.com', '*.example.com'));
+        $this->assertFalse($validator->matchesWildcard('deep.sub.example.com', '*.example.com'));
+    }
+
+    public function testValidateCertificate(): void
+    {
+        $validator = new CertificateValidator([
+            'allow_self_signed' => true,
+        ]);
+
+        $certificates = [$this->testCertPem];
+        $result = $validator->validateCertificate($certificates);
+        $this->assertTrue($result);
+
+        $result = $validator->validateCertificate([]);
+        $this->assertFalse($result);
+
+        $result = $validator->validateCertificate(['invalid cert']);
+        $this->assertFalse($result);
+    }
+
+    public function testValidateCertificateChain(): void
+    {
+        $validator = new CertificateValidator([
+            'allow_self_signed' => true,
+        ]);
+
+        $certificates = [$this->testCertPem];
+        $result = $validator->validateCertificateChain($certificates);
+        $this->assertTrue($result);
+
+        $result = $validator->validateCertificateChain([]);
+        $this->assertFalse($result);
+    }
+
+    public function testVerifyHostname(): void
+    {
+        $validator = new CertificateValidator([
+            'verify_peer_name' => true,
+            'allow_self_signed' => true,
+        ]);
+
+        $hostname = 'example.com';
+        $result = $validator->verifyHostname($this->testCertPem, $hostname);
+        $this->assertFalse($result);
+
+        $validator = new CertificateValidator([
+            'verify_peer_name' => false,
+        ]);
+        $result = $validator->verifyHostname($this->testCertPem, $hostname);
+        $this->assertTrue($result);
+    }
+
+    public function testVerifySignature(): void
+    {
+        $validator = new CertificateValidator([
+            'allow_self_signed' => true,
+        ]);
+
+        $data = 'test data to sign';
+        $signature = $validator->signData($data, $this->testPrivateKeyPem);
+        $verified = $validator->verifySignature($data, $signature, $this->testCertPem);
+        $this->assertTrue($verified);
+
+        $verified = $validator->verifySignature($data, 'invalid signature', $this->testCertPem);
+        $this->assertFalse($verified);
+    }
+
     protected function setUp(): void
     {
+        parent::setUp();
+
         $this->validator = new CertificateValidator();
 
         // 创建测试证书和私钥
         $this->createTestCertificate();
     }
-    
+
     /**
      * 创建测试用的自签名证书
      */
@@ -299,7 +465,11 @@ class CertificateValidatorTest extends TestCase
             'curve_name' => 'prime256v1',
             'private_key_type' => OPENSSL_KEYTYPE_EC,
         ]);
-        
+
+        if (false === $privateKey) {
+            self::fail('Failed to create private key');
+        }
+
         // 创建证书请求
         $dn = [
             'C' => 'US',
@@ -309,21 +479,33 @@ class CertificateValidatorTest extends TestCase
             'OU' => 'Test Unit',
             'CN' => 'test.example.com',
         ];
-        
+
         $csr = openssl_csr_new($dn, $privateKey, [
             'digest_alg' => 'sha256',
             'x509_extensions' => 'v3_req',
         ]);
-        
+
+        if (false === $csr || true === $csr) {
+            self::fail('Failed to create certificate request');
+        }
+
         // 创建自签名证书
         $cert = openssl_csr_sign($csr, null, $privateKey, 365, [
             'digest_alg' => 'sha256',
         ]);
-        
+
+        if (false === $cert) {
+            self::fail('Failed to create certificate');
+        }
+
         // 导出 PEM 格式
-        openssl_x509_export($cert, $this->testCertPem);
-        openssl_pkey_export($privateKey, $this->testPrivateKeyPem);
-        
+        if (!openssl_x509_export($cert, $this->testCertPem)) {
+            self::fail('Failed to export certificate');
+        }
+        if (!openssl_pkey_export($privateKey, $this->testPrivateKeyPem)) {
+            self::fail('Failed to export private key');
+        }
+
         // PHP 8+ 不需要手动释放资源，资源会自动释放
     }
 }

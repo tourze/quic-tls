@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Tourze\QUIC\TLS\Message;
 
+use Tourze\QUIC\TLS\Exception\InvalidParameterException;
 use Tourze\QUIC\TLS\TransportParameters;
 
 /**
@@ -11,7 +12,9 @@ use Tourze\QUIC\TLS\TransportParameters;
  */
 class EncryptedExtensions
 {
+    /** @var array<int, string> */
     private array $extensions = [];
+
     private ?TransportParameters $transportParameters = null;
 
     public function __construct(?TransportParameters $transportParams = null)
@@ -26,6 +29,7 @@ class EncryptedExtensions
     public function encode(): string
     {
         $extensionsData = $this->encodeExtensions();
+
         return pack('n', strlen($extensionsData)) . $extensionsData;
     }
 
@@ -35,10 +39,14 @@ class EncryptedExtensions
     public static function decode(string $data): self
     {
         $encryptedExt = new self();
-        
-        $extensionsLength = unpack('n', substr($data, 0, 2))[1];
+
+        $unpackResult = unpack('n', substr($data, 0, 2));
+        if (false === $unpackResult) {
+            throw new InvalidParameterException('Failed to unpack extensions length');
+        }
+        $extensionsLength = $unpackResult[1];
         $encryptedExt->parseExtensions(substr($data, 2, $extensionsLength));
-        
+
         return $encryptedExt;
     }
 
@@ -48,8 +56,10 @@ class EncryptedExtensions
     private function buildExtensions(): void
     {
         // QUIC Transport Parameters
-        $this->extensions[0x0039] = $this->transportParameters->encode();
-        
+        if (null !== $this->transportParameters) {
+            $this->extensions[0x0039] = $this->transportParameters->encode();
+        }
+
         // Server Name (if needed)
         // Application Layer Protocol Negotiation (ALPN)
         $this->extensions[0x0010] = $this->buildALPNExtension(['h3']);
@@ -61,13 +71,13 @@ class EncryptedExtensions
     private function encodeExtensions(): string
     {
         $data = '';
-        
+
         foreach ($this->extensions as $type => $extensionData) {
             $data .= pack('n', $type);
             $data .= pack('n', strlen($extensionData));
             $data .= $extensionData;
         }
-        
+
         return $data;
     }
 
@@ -78,21 +88,29 @@ class EncryptedExtensions
     {
         $offset = 0;
         $length = strlen($data);
-        
+
         while ($offset < $length) {
-            $type = unpack('n', substr($data, $offset, 2))[1];
+            $unpackResult = unpack('n', substr($data, $offset, 2));
+            if (false === $unpackResult) {
+                throw new InvalidParameterException('Failed to unpack extension type');
+            }
+            $type = $unpackResult[1];
             $offset += 2;
-            
-            $extLength = unpack('n', substr($data, $offset, 2))[1];
+
+            $unpackResult = unpack('n', substr($data, $offset, 2));
+            if (false === $unpackResult) {
+                throw new InvalidParameterException('Failed to unpack extension length');
+            }
+            $extLength = $unpackResult[1];
             $offset += 2;
-            
+
             $extData = substr($data, $offset, $extLength);
             $offset += $extLength;
-            
+
             $this->extensions[$type] = $extData;
-            
+
             // 解析QUIC传输参数
-            if ($type === 0x0039) {
+            if (0x0039 === $type) {
                 $this->transportParameters = TransportParameters::decode($extData);
             }
         }
@@ -101,18 +119,21 @@ class EncryptedExtensions
     /**
      * 构建ALPN扩展
      */
+    /**
+     * @param array<string> $protocols
+     */
     private function buildALPNExtension(array $protocols): string
     {
         $data = '';
         $protocolsData = '';
-        
+
         foreach ($protocols as $protocol) {
             $protocolsData .= chr(strlen($protocol)) . $protocol;
         }
-        
+
         $data .= pack('n', strlen($protocolsData));
         $data .= $protocolsData;
-        
+
         return $data;
     }
 
@@ -136,8 +157,11 @@ class EncryptedExtensions
     /**
      * 获取扩展
      */
+    /**
+     * @return array<int, string>
+     */
     public function getExtensions(): array
     {
         return $this->extensions;
     }
-} 
+}

@@ -2,27 +2,32 @@
 
 declare(strict_types=1);
 
-namespace Tourze\QUIC\TLS\Tests\Unit\Exception;
+namespace Tourze\QUIC\TLS\Tests\Exception;
 
-use PHPUnit\Framework\TestCase;
+use PHPUnit\Framework\Attributes\CoversClass;
+use Tourze\PHPUnitBase\AbstractExceptionTestCase;
 use Tourze\QUIC\TLS\Exception\TlsProtocolException;
 
-class TlsProtocolExceptionTest extends TestCase
+/**
+ * @internal
+ */
+#[CoversClass(TlsProtocolException::class)]
+final class TlsProtocolExceptionTest extends AbstractExceptionTestCase
 {
-    public function test_inheritance(): void
+    public function testInheritance(): void
     {
         $exception = new TlsProtocolException();
         $this->assertInstanceOf(\RuntimeException::class, $exception);
     }
 
-    public function test_constructor_withMessage(): void
+    public function testConstructorWithMessage(): void
     {
         $message = 'TLS协议错误';
         $exception = new TlsProtocolException($message);
         $this->assertEquals($message, $exception->getMessage());
     }
 
-    public function test_constructor_withMessageAndCode(): void
+    public function testConstructorWithMessageAndCode(): void
     {
         $message = 'TLS协议错误';
         $code = 1005;
@@ -31,7 +36,7 @@ class TlsProtocolExceptionTest extends TestCase
         $this->assertEquals($code, $exception->getCode());
     }
 
-    public function test_constructor_withMessageCodeAndPrevious(): void
+    public function testConstructorWithMessageCodeAndPrevious(): void
     {
         $previous = new \Exception('原始异常');
         $message = 'TLS协议错误';

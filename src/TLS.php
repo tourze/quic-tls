@@ -4,11 +4,10 @@ declare(strict_types=1);
 
 namespace Tourze\QUIC\TLS;
 
-use Tourze\QUIC\TLS\TLS\CryptoManager;
-use Tourze\QUIC\TLS\TLS\HandshakeManager;
 use Tourze\QUIC\TLS\Exception\InvalidHandshakeStateException;
 use Tourze\QUIC\TLS\Exception\InvalidParameterException;
-use Tourze\QUIC\TLS\Exception\TlsProtocolException;
+use Tourze\QUIC\TLS\TLS\CryptoManager;
+use Tourze\QUIC\TLS\TLS\HandshakeManager;
 
 /**
  * QUIC TLS 主入口类
@@ -23,26 +22,30 @@ class TLS
     public const STATE_ESTABLISHED = 'established';
     public const STATE_CLOSING = 'closing';
     public const STATE_CLOSED = 'closed';
-    
+
     // TLS 加密级别
     public const LEVEL_INITIAL = 'initial';
     public const LEVEL_HANDSHAKE = 'handshake';
     public const LEVEL_APPLICATION = 'application';
-    
+
     private HandshakeManager $handshakeManager;
+
     private CryptoManager $cryptoManager;
-    
+
     private string $state = self::STATE_INITIAL;
+
     private string $currentLevel = self::LEVEL_INITIAL;
-    
-    private bool $isServer;
+
     private ?TransportParameters $localParams = null;
+
     private ?TransportParameters $peerParams = null;
-    
+
     // 配置选项
+    /** @var array<string, mixed> */
     private array $config = [];
-    
+
     // 统计信息
+    /** @var array<string, mixed> */
     private array $stats = [
         'handshake_start_time' => null,
         'handshake_duration' => null,
@@ -51,42 +54,42 @@ class TLS
         'messages_sent' => 0,
         'messages_received' => 0,
     ];
-    
+
     // 回调函数
+    /** @var array<string, callable> */
     private array $callbacks = [];
-    
+
     /**
      * 构造函数
      *
-     * @param bool $isServer 是否为服务器端
-     * @param array $config 配置选项
+     * @param bool  $isServer 是否为服务器端
+     * @param array<string, mixed> $config   配置选项
      */
-    public function __construct(bool $isServer, array $config = [])
+    public function __construct(private readonly bool $isServer, array $config = [])
     {
-        $this->isServer = $isServer;
         $this->config = array_merge($this->getDefaultConfig(), $config);
-        
+
         // 初始化传输参数
         $this->localParams = $this->createTransportParameters();
-        
+
         // 初始化证书验证器
         $certValidator = new CertificateValidator($this->config['cert_config'] ?? []);
-        
+
         // 初始化管理器
         $this->handshakeManager = new HandshakeManager($isServer, $this->localParams, $certValidator);
         $this->cryptoManager = new CryptoManager($isServer);
-        
+
         // 设置 PSK（如果有）
         if (isset($this->config['psk'])) {
             $this->handshakeManager->setPSK($this->config['psk'], $this->config['psk_identity'] ?? '');
         }
-        
+
         // 尝试恢复会话（如果有）
         if (isset($this->config['session_ticket'])) {
             $this->handshakeManager->resumeSession($this->config['session_ticket']);
         }
     }
-    
+
     /**
      * 开始 TLS 握手
      *
@@ -94,139 +97,144 @@ class TLS
      */
     public function startHandshake(): string
     {
-        if ($this->state !== self::STATE_INITIAL) {
+        if (self::STATE_INITIAL !== $this->state) {
             throw new InvalidHandshakeStateException("不能在状态 {$this->state} 下开始握手");
         }
-        
+
         $this->state = self::STATE_HANDSHAKING;
         $this->stats['handshake_start_time'] = microtime(true);
-        
+
         $initialMessage = $this->handshakeManager->startHandshake();
-        
-        if ($initialMessage !== '') {
+
+        if ('' !== $initialMessage) {
             $this->stats['bytes_sent'] += strlen($initialMessage);
-            $this->stats['messages_sent']++;
+            ++$this->stats['messages_sent'];
             $this->triggerCallback('message_sent', ['data' => $initialMessage, 'level' => $this->currentLevel]);
         }
-        
+
         // 返回初始消息字符串
-        return $initialMessage !== '' ? $initialMessage : '';
+        return '' !== $initialMessage ? $initialMessage : '';
     }
-    
+
     /**
      * 处理接收到的握手数据
      *
-     * @param string $data 接收到的数据
+     * @param string $data  接收到的数据
      * @param string $level 加密级别
-     * @return array 包含响应数据和状态信息
+     *
+     * @return array<string, mixed> 包含响应数据和状态信息
      */
     public function processHandshakeData(string $data, string $level = self::LEVEL_INITIAL): array
     {
-        if ($this->state === self::STATE_CLOSED) {
-            throw new InvalidHandshakeStateException("连接已关闭");
+        if (self::STATE_CLOSED === $this->state) {
+            throw new InvalidHandshakeStateException('连接已关闭');
         }
-        
+
         // 如果服务器还在初始状态，自动开始握手
-        if ($this->isServer && $this->state === self::STATE_INITIAL) {
+        if ($this->isServer && self::STATE_INITIAL === $this->state) {
             $this->state = self::STATE_HANDSHAKING;
             $this->stats['handshake_start_time'] = microtime(true);
         }
-        
+
         $this->stats['bytes_received'] += strlen($data);
-        $this->stats['messages_received']++;
-        
+        ++$this->stats['messages_received'];
+
         $this->triggerCallback('message_received', ['data' => $data, 'level' => $level]);
-        
+
         try {
             $result = $this->handshakeManager->processHandshakeData($data, $level);
-            
+
             // 更新状态
-            if ($result['isComplete'] && $this->state === self::STATE_HANDSHAKING) {
+            if (isset($result['isComplete']) && true === $result['isComplete'] && self::STATE_HANDSHAKING === $this->state) {
                 $this->state = self::STATE_ESTABLISHED;
                 $this->currentLevel = self::LEVEL_APPLICATION;
                 $this->peerParams = $this->handshakeManager->getNegotiatedParameters();
-                
+
                 $this->stats['handshake_duration'] = microtime(true) - $this->stats['handshake_start_time'];
-                
+
                 $this->triggerCallback('handshake_complete', [
                     'duration' => $this->stats['handshake_duration'],
                     'negotiated_params' => $this->peerParams,
                 ]);
             }
-            
+
             // 更新加密级别
             if (isset($result['newLevel'])) {
                 $this->currentLevel = $result['newLevel'];
             }
-            
+
             // 统计发送数据
             foreach ($result['responses'] as $response) {
                 $this->stats['bytes_sent'] += strlen($response['data']);
-                $this->stats['messages_sent']++;
+                ++$this->stats['messages_sent'];
                 $this->triggerCallback('message_sent', $response);
             }
-            
+
             return $result;
-            
         } catch (\Exception $e) {
             $this->state = self::STATE_CLOSED;
             $this->triggerCallback('error', ['message' => $e->getMessage(), 'exception' => $e]);
             throw $e;
         }
     }
-    
+
     /**
      * 加密应用数据
      *
-     * @param string $plaintext 明文数据
+     * @param string $plaintext      明文数据
      * @param string $associatedData 关联数据
+     *
      * @return string 加密后的数据
      */
     public function encrypt(string $plaintext, string $associatedData = ''): string
     {
-        if ($this->state !== self::STATE_ESTABLISHED) {
-            throw new InvalidHandshakeStateException("连接未建立，无法加密数据");
+        if (self::STATE_ESTABLISHED !== $this->state) {
+            throw new InvalidHandshakeStateException('连接未建立，无法加密数据');
         }
-        
+
         $ciphertext = $this->cryptoManager->encrypt($plaintext, $this->currentLevel, $associatedData);
-        
+
         $this->stats['bytes_sent'] += strlen($ciphertext);
         $this->triggerCallback('data_encrypted', ['plaintext_size' => strlen($plaintext), 'ciphertext_size' => strlen($ciphertext)]);
-        
+
         return $ciphertext;
     }
-    
+
     /**
      * 解密应用数据
      *
-     * @param string $ciphertext 密文数据
+     * @param string $ciphertext     密文数据
      * @param string $associatedData 关联数据
+     *
      * @return string 解密后的数据
      */
     public function decrypt(string $ciphertext, string $associatedData = ''): string
     {
-        if ($this->state !== self::STATE_ESTABLISHED) {
-            throw new InvalidHandshakeStateException("连接未建立，无法解密数据");
+        if (self::STATE_ESTABLISHED !== $this->state) {
+            throw new InvalidHandshakeStateException('连接未建立，无法解密数据');
         }
-        
+
         $plaintext = $this->cryptoManager->decrypt($ciphertext, $this->currentLevel, $associatedData);
-        
+
         $this->stats['bytes_received'] += strlen($ciphertext);
         $this->triggerCallback('data_decrypted', ['ciphertext_size' => strlen($ciphertext), 'plaintext_size' => strlen($plaintext)]);
-        
+
         return $plaintext;
     }
-    
+
     /**
      * 处理消息（简化的接口）
+     */
+    /**
+     * @return array<string, mixed>
      */
     public function processMessage(string $message): array
     {
         $previousState = $this->state;
-        
+
         try {
             $result = $this->processHandshakeData($message);
-            
+
             return [
                 'response' => $result['responses'][0]['data'] ?? '',
                 'state_changed' => $this->state !== $previousState,
@@ -241,71 +249,72 @@ class TLS
             ];
         }
     }
-    
+
     /**
      * 更新流量密钥
      */
     public function updateKeys(): void
     {
-        if ($this->state !== self::STATE_ESTABLISHED) {
-            throw new InvalidHandshakeStateException("连接未建立，无法更新密钥");
+        if (self::STATE_ESTABLISHED !== $this->state) {
+            throw new InvalidHandshakeStateException('连接未建立，无法更新密钥');
         }
-        
+
         // 确保CryptoManager处于正确的级别
         $this->cryptoManager->setLevel($this->currentLevel);
-        
+
         // 直接更新CryptoManager的密钥，而不是通过HandshakeManager
         $this->cryptoManager->updateKeys();
         $this->triggerCallback('keys_updated', []);
     }
-    
+
     /**
      * 导出密钥材料
      *
-     * @param string $label 导出标签
-     * @param int $length 导出长度
+     * @param string $label  导出标签
+     * @param int    $length 导出长度
+     *
      * @return string 导出的密钥材料
      */
     public function exportKeyingMaterial(string $label, int $length): string
     {
-        if ($this->state !== self::STATE_ESTABLISHED) {
-            throw new InvalidHandshakeStateException("连接未建立，无法导出密钥");
+        if (self::STATE_ESTABLISHED !== $this->state) {
+            throw new InvalidHandshakeStateException('连接未建立，无法导出密钥');
         }
-        
+
         return $this->handshakeManager->exportKeyingMaterial($label, $length);
     }
-    
+
     /**
      * 获取会话票据
      */
     public function getSessionTicket(): ?string
     {
-        if ($this->state !== self::STATE_ESTABLISHED) {
+        if (self::STATE_ESTABLISHED !== $this->state) {
             return null;
         }
-        
+
         return $this->handshakeManager->getSessionTicket();
     }
-    
+
     /**
      * 关闭连接
      */
     public function close(): void
     {
-        if ($this->state === self::STATE_CLOSED) {
+        if (self::STATE_CLOSED === $this->state) {
             return;
         }
-        
+
         $this->state = self::STATE_CLOSING;
         $this->triggerCallback('closing', []);
-        
+
         // 清理资源
         $this->clearSensitiveData();
-        
+
         $this->state = self::STATE_CLOSED;
         $this->triggerCallback('closed', []);
     }
-    
+
     /**
      * 获取连接状态
      */
@@ -313,7 +322,7 @@ class TLS
     {
         return $this->state;
     }
-    
+
     /**
      * 获取当前加密级别
      */
@@ -321,23 +330,23 @@ class TLS
     {
         return $this->currentLevel;
     }
-    
+
     /**
      * 检查握手是否完成
      */
     public function isHandshakeComplete(): bool
     {
-        return $this->state === self::STATE_ESTABLISHED;
+        return self::STATE_ESTABLISHED === $this->state;
     }
-    
+
     /**
      * 检查连接是否已建立
      */
     public function isEstablished(): bool
     {
-        return $this->state === self::STATE_ESTABLISHED;
+        return self::STATE_ESTABLISHED === $this->state;
     }
-    
+
     /**
      * 获取协商的传输参数
      */
@@ -345,25 +354,31 @@ class TLS
     {
         return $this->peerParams;
     }
-    
+
     /**
      * 获取本地传输参数
      */
-    public function getLocalParameters(): TransportParameters
+    public function getLocalParameters(): ?TransportParameters
     {
         return $this->localParams;
     }
-    
+
     /**
      * 获取统计信息
+     */
+    /**
+     * @return array<string, mixed>
      */
     public function getStats(): array
     {
         return $this->stats;
     }
-    
+
     /**
      * 获取调试信息
+     */
+    /**
+     * @return array<string, mixed>
      */
     public function getDebugInfo(): array
     {
@@ -373,7 +388,7 @@ class TLS
             'is_server' => $this->isServer,
         ], $this->handshakeManager->getDebugInfo(), $this->stats);
     }
-    
+
     /**
      * 设置回调函数
      */
@@ -404,7 +419,7 @@ class TLS
      */
     public function setCipherSuite(string $cipherSuite): void
     {
-        if (!in_array($cipherSuite, self::getSupportedCipherSuites())) {
+        if (!in_array($cipherSuite, self::getSupportedCipherSuites(), true)) {
             throw new InvalidParameterException("不支持的密码套件: {$cipherSuite}");
         }
         $this->config['cipher_suite'] = $cipherSuite;
@@ -412,6 +427,9 @@ class TLS
 
     /**
      * 获取统计信息
+     */
+    /**
+     * @return array<string, mixed>
      */
     public function getStatistics(): array
     {
@@ -421,7 +439,7 @@ class TLS
             'bytes_encrypted' => $this->stats['bytes_sent'],
             'bytes_decrypted' => $this->stats['bytes_received'],
             'cipher_suite' => $this->config['cipher_suite'] ?? 'TLS_AES_128_GCM_SHA256',
-            'transport_parameters' => $this->localParams !== null ? $this->localParams->toArray() : []
+            'transport_parameters' => null !== $this->localParams ? $this->localParams->toArray() : [],
         ]);
     }
 
@@ -454,6 +472,9 @@ class TLS
     /**
      * 设置回调函数
      */
+    /**
+     * @param array<string, callable> $callbacks
+     */
     public function setCallbacks(array $callbacks): void
     {
         $this->callbacks = array_merge($this->callbacks, $callbacks);
@@ -477,13 +498,14 @@ class TLS
 
     /**
      * 获取支持的密码套件
+     * @return array<int, string>
      */
     public static function getSupportedCipherSuites(): array
     {
         return [
             0x1301 => 'TLS_AES_128_GCM_SHA256',
             0x1302 => 'TLS_AES_256_GCM_SHA384',
-            0x1303 => 'TLS_CHACHA20_POLY1305_SHA256'
+            0x1303 => 'TLS_CHACHA20_POLY1305_SHA256',
         ];
     }
 
@@ -497,6 +519,7 @@ class TLS
 
     /**
      * 获取连接信息
+     * @return array<string, mixed>
      */
     public function getConnectionInfo(): array
     {
@@ -505,12 +528,15 @@ class TLS
             'cipher_suite' => $this->config['cipher_suite'] ?? 'TLS_AES_128_GCM_SHA256',
             'handshake_complete' => $this->isHandshakeComplete(),
             'state' => $this->state,
-            'current_level' => $this->currentLevel
+            'current_level' => $this->currentLevel,
         ];
     }
-    
+
     /**
      * 触发回调函数
+     */
+    /**
+     * @param array<string, mixed> $data
      */
     private function triggerCallback(string $event, array $data = []): void
     {
@@ -522,9 +548,12 @@ class TLS
             }
         }
     }
-    
+
     /**
      * 获取默认配置
+     */
+    /**
+     * @return array<string, mixed>
      */
     private function getDefaultConfig(): array
     {
@@ -544,14 +573,14 @@ class TLS
             'cert_config' => [],
         ];
     }
-    
+
     /**
      * 创建传输参数
      */
     private function createTransportParameters(): TransportParameters
     {
         $params = new TransportParameters();
-        
+
         $params->setMaxIdleTimeout($this->config['max_idle_timeout']);
         $params->setMaxUdpPayloadSize($this->config['max_udp_payload_size']);
         $params->setInitialMaxData($this->config['initial_max_data']);
@@ -559,10 +588,10 @@ class TLS
         $params->setInitialMaxStreamDataBidiRemote($this->config['initial_max_stream_data_bidi_remote']);
         $params->setInitialMaxStreamsBidi($this->config['initial_max_streams_bidi']);
         $params->setInitialMaxStreamsUni($this->config['initial_max_streams_uni']);
-        
+
         return $params;
     }
-    
+
     /**
      * 清理敏感数据
      */
@@ -572,27 +601,30 @@ class TLS
         if (isset($this->config['psk'])) {
             sodium_memzero($this->config['psk']);
         }
-        
+
         // 其他清理操作...
     }
-    
+
     /**
      * 创建客户端实例
+     */
+    /**
+     * @param array<string, mixed> $config
      */
     public static function createClient(array $config = []): self
     {
         return new self(false, $config);
     }
-    
+
     /**
      * 创建服务器实例
+     * @param array<string, mixed> $config
      */
     public static function createServer(array $config = []): self
     {
         return new self(true, $config);
     }
-    
-    
+
     /**
      * 获取版本信息
      */
@@ -600,9 +632,12 @@ class TLS
     {
         return '1.0.0';
     }
-    
+
     /**
      * 检查系统支持
+     */
+    /**
+     * @return array<string, mixed>
      */
     public static function checkSupport(): array
     {
@@ -612,12 +647,13 @@ class TLS
             'openssl_version' => defined('OPENSSL_VERSION_TEXT') ? OPENSSL_VERSION_TEXT : 'unknown',
             'tls_1_3' => false,
         ];
-        
+
         // 检查 TLS 1.3 支持
         if ($support['openssl']) {
-            $support['tls_1_3'] = version_compare(phpversion('openssl'), '1.1.1', '>=');
+            $opensslVersion = phpversion('openssl');
+            $support['tls_1_3'] = false !== $opensslVersion && version_compare($opensslVersion, '1.1.1', '>=');
         }
-        
+
         return $support;
     }
 }

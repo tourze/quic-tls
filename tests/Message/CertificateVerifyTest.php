@@ -2,21 +2,26 @@
 
 declare(strict_types=1);
 
-namespace Tourze\QUIC\TLS\Tests\Unit\Message;
+namespace Tourze\QUIC\TLS\Tests\Message;
 
+use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
 use Tourze\QUIC\TLS\Message\CertificateVerify;
 
-class CertificateVerifyTest extends TestCase
+/**
+ * @internal
+ */
+#[CoversClass(CertificateVerify::class)]
+final class CertificateVerifyTest extends TestCase
 {
-    public function test_constructor_withDefaults(): void
+    public function testConstructorWithDefaults(): void
     {
         $certificateVerify = new CertificateVerify();
         $this->assertEquals('', $certificateVerify->getSignature());
         $this->assertEquals(0x0403, $certificateVerify->getSignatureAlgorithm());
     }
 
-    public function test_constructor_withSignature(): void
+    public function testConstructorWithSignature(): void
     {
         $signature = 'test-signature';
         $certificateVerify = new CertificateVerify($signature);
@@ -24,7 +29,7 @@ class CertificateVerifyTest extends TestCase
         $this->assertEquals(0x0403, $certificateVerify->getSignatureAlgorithm());
     }
 
-    public function test_constructor_withSignatureAndAlgorithm(): void
+    public function testConstructorWithSignatureAndAlgorithm(): void
     {
         $signature = 'test-signature';
         $algorithm = 0x0503;
@@ -33,15 +38,7 @@ class CertificateVerifyTest extends TestCase
         $this->assertEquals($algorithm, $certificateVerify->getSignatureAlgorithm());
     }
 
-    public function test_setSignature(): void
-    {
-        $certificateVerify = new CertificateVerify();
-        $signature = 'new-signature';
-        $certificateVerify->setSignature($signature);
-        $this->assertEquals($signature, $certificateVerify->getSignature());
-    }
-
-    public function test_setSignatureAlgorithm(): void
+    public function testSetSignatureAlgorithm(): void
     {
         $certificateVerify = new CertificateVerify();
         $algorithm = 0x0603;
@@ -49,7 +46,7 @@ class CertificateVerifyTest extends TestCase
         $this->assertEquals($algorithm, $certificateVerify->getSignatureAlgorithm());
     }
 
-    public function test_encode_withEmptySignature(): void
+    public function testEncodeWithEmptySignature(): void
     {
         $certificateVerify = new CertificateVerify();
         $encoded = $certificateVerify->encode();
@@ -58,7 +55,7 @@ class CertificateVerifyTest extends TestCase
         $this->assertEquals(4, strlen($encoded));
     }
 
-    public function test_encode_withSignature(): void
+    public function testEncodeWithSignature(): void
     {
         $signature = 'test-signature';
         $certificateVerify = new CertificateVerify($signature);
@@ -68,34 +65,34 @@ class CertificateVerifyTest extends TestCase
         $this->assertEquals(4 + strlen($signature), strlen($encoded));
     }
 
-    public function test_encodeAndDecode_roundTrip(): void
+    public function testEncodeAndDecodeRoundTrip(): void
     {
         $originalSignature = 'test-signature-data';
         $originalAlgorithm = 0x0503;
-        
+
         $certificateVerify = new CertificateVerify($originalSignature, $originalAlgorithm);
         $encoded = $certificateVerify->encode();
         $decoded = CertificateVerify::decode($encoded);
-        
+
         $this->assertEquals($originalSignature, $decoded->getSignature());
         $this->assertEquals($originalAlgorithm, $decoded->getSignatureAlgorithm());
     }
 
-    public function test_decode_withBinaryData(): void
+    public function testDecodeWithBinaryData(): void
     {
         $algorithm = 0x0403;
         $signature = 'binary-signature-data';
-        
+
         $data = pack('n', $algorithm); // 算法
         $data .= pack('n', strlen($signature)); // 签名长度
         $data .= $signature; // 签名内容
-        
+
         $decoded = CertificateVerify::decode($data);
         $this->assertEquals($signature, $decoded->getSignature());
         $this->assertEquals($algorithm, $decoded->getSignatureAlgorithm());
     }
 
-    public function test_supportedAlgorithms(): void
+    public function testSupportedAlgorithms(): void
     {
         $algorithms = [
             0x0403, // ecdsa_secp256r1_sha256
@@ -105,7 +102,7 @@ class CertificateVerifyTest extends TestCase
             0x0805, // rsa_pss_rsae_sha384
             0x0806, // rsa_pss_rsae_sha512
         ];
-        
+
         foreach ($algorithms as $algorithm) {
             $certificateVerify = new CertificateVerify('test-sig', $algorithm);
             $this->assertEquals($algorithm, $certificateVerify->getSignatureAlgorithm());

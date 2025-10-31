@@ -2,22 +2,28 @@
 
 declare(strict_types=1);
 
-namespace Tourze\QUIC\TLS\Tests\Unit\Message;
+namespace Tourze\QUIC\TLS\Tests\Message;
 
+use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
+use Tourze\QUIC\TLS\Exception\InvalidParameterException;
 use Tourze\QUIC\TLS\Message\ClientHello;
 use Tourze\QUIC\TLS\TransportParameters;
 
-class ClientHelloTest extends TestCase
+/**
+ * @internal
+ */
+#[CoversClass(ClientHello::class)]
+final class ClientHelloTest extends TestCase
 {
-    public function test_constructor_withoutParameters(): void
+    public function testConstructorWithoutParameters(): void
     {
         $clientHello = new ClientHello();
         $this->assertInstanceOf(ClientHello::class, $clientHello);
         $this->assertInstanceOf(TransportParameters::class, $clientHello->getTransportParameters());
     }
 
-    public function test_constructor_withTransportParameters(): void
+    public function testConstructorWithTransportParameters(): void
     {
         $params = new TransportParameters([
             TransportParameters::PARAM_MAX_IDLE_TIMEOUT => 30000,
@@ -26,7 +32,7 @@ class ClientHelloTest extends TestCase
         $this->assertSame($params, $clientHello->getTransportParameters());
     }
 
-    public function test_encode_generatesValidMessage(): void
+    public function testEncodeGeneratesValidMessage(): void
     {
         $clientHello = new ClientHello();
         $encoded = $clientHello->encode();
@@ -34,21 +40,21 @@ class ClientHelloTest extends TestCase
         $this->assertGreaterThan(100, strlen($encoded)); // ClientHello应该相当大
     }
 
-    public function test_getRandom_returns32Bytes(): void
+    public function testGetRandomReturns32Bytes(): void
     {
         $clientHello = new ClientHello();
         $random = $clientHello->getRandom();
         $this->assertEquals(32, strlen($random));
     }
 
-    public function test_getSessionId_returns32Bytes(): void
+    public function testGetSessionIdReturns32Bytes(): void
     {
         $clientHello = new ClientHello();
         $sessionId = $clientHello->getSessionId();
         $this->assertEquals(32, strlen($sessionId));
     }
 
-    public function test_getCipherSuites_returnsDefaultSuites(): void
+    public function testGetCipherSuitesReturnsDefaultSuites(): void
     {
         $clientHello = new ClientHello();
         $cipherSuites = $clientHello->getCipherSuites();
@@ -58,14 +64,14 @@ class ClientHelloTest extends TestCase
         $this->assertContains(0x1303, $cipherSuites); // TLS_CHACHA20_POLY1305_SHA256
     }
 
-    public function test_getExtensions_returnsExtensions(): void
+    public function testGetExtensionsReturnsExtensions(): void
     {
         $clientHello = new ClientHello();
         $extensions = $clientHello->getExtensions();
         $this->assertNotEmpty($extensions);
     }
 
-    public function test_getExtension_withValidType(): void
+    public function testGetExtensionWithValidType(): void
     {
         $clientHello = new ClientHello();
         $sniExtension = $clientHello->getExtension(0x0000); // SNI
@@ -73,14 +79,14 @@ class ClientHelloTest extends TestCase
         $this->assertNotEmpty($sniExtension);
     }
 
-    public function test_getExtension_withInvalidType(): void
+    public function testGetExtensionWithInvalidType(): void
     {
         $clientHello = new ClientHello();
         $unknownExtension = $clientHello->getExtension(0x9999);
         $this->assertNull($unknownExtension);
     }
 
-    public function test_setRandom(): void
+    public function testSetRandom(): void
     {
         $clientHello = new ClientHello();
         $customRandom = str_repeat('a', 32);
@@ -88,7 +94,7 @@ class ClientHelloTest extends TestCase
         $this->assertEquals($customRandom, $clientHello->getRandom());
     }
 
-    public function test_setCipherSuites(): void
+    public function testSetCipherSuites(): void
     {
         $clientHello = new ClientHello();
         $customSuites = [0x1301, 0x1302];
@@ -96,7 +102,7 @@ class ClientHelloTest extends TestCase
         $this->assertEquals($customSuites, $clientHello->getCipherSuites());
     }
 
-    public function test_setExtensions(): void
+    public function testSetExtensions(): void
     {
         $clientHello = new ClientHello();
         $customExtensions = [0x0000 => 'test-extension'];
@@ -104,7 +110,7 @@ class ClientHelloTest extends TestCase
         $this->assertEquals($customExtensions, $clientHello->getExtensions());
     }
 
-    public function test_setTransportParameters(): void
+    public function testSetTransportParameters(): void
     {
         $clientHello = new ClientHello();
         $newParams = new TransportParameters([
@@ -114,23 +120,23 @@ class ClientHelloTest extends TestCase
         $this->assertSame($newParams, $clientHello->getTransportParameters());
     }
 
-    public function test_encodeAndDecode_roundTrip(): void
+    public function testEncodeAndDecodeRoundTrip(): void
     {
         $params = new TransportParameters([
             TransportParameters::PARAM_MAX_IDLE_TIMEOUT => 30000,
         ]);
         $clientHello = new ClientHello($params);
-        
+
         $encoded = $clientHello->encode();
         $decoded = ClientHello::decode($encoded);
-        
+
         $this->assertEquals($clientHello->getRandom(), $decoded->getRandom());
         $this->assertEquals($clientHello->getSessionId(), $decoded->getSessionId());
         $this->assertEquals($clientHello->getCipherSuites(), $decoded->getCipherSuites());
         $this->assertInstanceOf(TransportParameters::class, $decoded->getTransportParameters());
     }
 
-    public function test_decode_withMinimalData(): void
+    public function testDecodeWithMinimalData(): void
     {
         // 构造最小的有效ClientHello数据
         $data = '';
@@ -143,15 +149,15 @@ class ClientHelloTest extends TestCase
         $data .= pack('n', 0x1303); // TLS_CHACHA20_POLY1305_SHA256
         $data .= "\x01\x00"; // 压缩方法
         $data .= "\x00\x00"; // 扩展长度为0
-        
+
         $decoded = ClientHello::decode($data);
         $this->assertInstanceOf(ClientHello::class, $decoded);
         $this->assertEquals(str_repeat('a', 32), $decoded->getRandom());
     }
 
-    public function test_decode_withInvalidData_throwsException(): void
+    public function testDecodeWithInvalidDataThrowsException(): void
     {
-        $this->expectException(\Tourze\QUIC\TLS\Exception\InvalidParameterException::class);
+        $this->expectException(InvalidParameterException::class);
         ClientHello::decode('invalid-data');
     }
 }

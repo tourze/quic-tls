@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Tourze\QUIC\TLS\Message;
 
+use Tourze\QUIC\TLS\Exception\InvalidParameterException;
 use Tourze\QUIC\TLS\TransportParameters;
 
 /**
@@ -12,11 +13,18 @@ use Tourze\QUIC\TLS\TransportParameters;
 class ServerHello
 {
     private string $protocolVersion = "\x03\x04"; // TLS 1.3
+
     private string $random;
+
     private string $sessionId;
+
     private int $cipherSuite = 0x1301; // TLS_AES_128_GCM_SHA256
+
     private int $compressionMethod = 0x00; // null compression
+
+    /** @var array<int, string> */
     private array $extensions = [];
+
     private ?TransportParameters $transportParameters = null;
 
     public function __construct(?TransportParameters $transportParams = null)
@@ -33,26 +41,26 @@ class ServerHello
     public function encode(): string
     {
         $data = '';
-        
+
         // Protocol Version
         $data .= $this->protocolVersion;
-        
+
         // Random
         $data .= $this->random;
-        
+
         // Session ID
         $data .= chr(strlen($this->sessionId)) . $this->sessionId;
-        
+
         // Cipher Suite
         $data .= pack('n', $this->cipherSuite);
-        
+
         // Compression Method
         $data .= chr($this->compressionMethod);
-        
+
         // Extensions
         $extensionsData = $this->encodeExtensions();
         $data .= pack('n', strlen($extensionsData)) . $extensionsData;
-        
+
         return $data;
     }
 
@@ -63,36 +71,44 @@ class ServerHello
     {
         $offset = 0;
         $serverHello = new self();
-        
+
         // Protocol Version
         $serverHello->protocolVersion = substr($data, $offset, 2);
         $offset += 2;
-        
+
         // Random
         $serverHello->random = substr($data, $offset, 32);
         $offset += 32;
-        
+
         // Session ID
         $sessionIdLength = ord($data[$offset]);
-        $offset++;
+        ++$offset;
         $serverHello->sessionId = substr($data, $offset, $sessionIdLength);
         $offset += $sessionIdLength;
-        
+
         // Cipher Suite
-        $serverHello->cipherSuite = unpack('n', substr($data, $offset, 2))[1];
+        $unpackResult = unpack('n', substr($data, $offset, 2));
+        if (false === $unpackResult) {
+            throw new InvalidParameterException('Failed to unpack cipher suite');
+        }
+        $serverHello->cipherSuite = $unpackResult[1];
         $offset += 2;
-        
+
         // Compression Method
         $serverHello->compressionMethod = ord($data[$offset]);
-        $offset++;
-        
+        ++$offset;
+
         // Extensions
         if ($offset < strlen($data)) {
-            $extensionsLength = unpack('n', substr($data, $offset, 2))[1];
+            $unpackResult = unpack('n', substr($data, $offset, 2));
+            if (false === $unpackResult) {
+                throw new InvalidParameterException('Failed to unpack extensions length');
+            }
+            $extensionsLength = $unpackResult[1];
             $offset += 2;
             $serverHello->parseExtensions(substr($data, $offset, $extensionsLength));
         }
-        
+
         return $serverHello;
     }
 
@@ -102,13 +118,15 @@ class ServerHello
     private function buildExtensions(): void
     {
         // Supported Versions
-        $this->extensions[0x002b] = $this->buildSupportedVersionsExtension();
-        
+        $this->extensions[0x002B] = $this->buildSupportedVersionsExtension();
+
         // Key Share
         $this->extensions[0x0033] = $this->buildKeyShareExtension();
-        
+
         // QUIC Transport Parameters
-        $this->extensions[0x0039] = $this->transportParameters->encode();
+        if (null !== $this->transportParameters) {
+            $this->extensions[0x0039] = $this->transportParameters->encode();
+        }
     }
 
     /**
@@ -117,13 +135,13 @@ class ServerHello
     private function encodeExtensions(): string
     {
         $data = '';
-        
+
         foreach ($this->extensions as $type => $extensionData) {
             $data .= pack('n', $type);
             $data .= pack('n', strlen($extensionData));
             $data .= $extensionData;
         }
-        
+
         return $data;
     }
 
@@ -134,21 +152,29 @@ class ServerHello
     {
         $offset = 0;
         $length = strlen($data);
-        
+
         while ($offset < $length) {
-            $type = unpack('n', substr($data, $offset, 2))[1];
+            $unpackResult = unpack('n', substr($data, $offset, 2));
+            if (false === $unpackResult) {
+                throw new InvalidParameterException('Failed to unpack extension type');
+            }
+            $type = $unpackResult[1];
             $offset += 2;
-            
-            $extLength = unpack('n', substr($data, $offset, 2))[1];
+
+            $unpackResult = unpack('n', substr($data, $offset, 2));
+            if (false === $unpackResult) {
+                throw new InvalidParameterException('Failed to unpack extension length');
+            }
+            $extLength = $unpackResult[1];
             $offset += 2;
-            
+
             $extData = substr($data, $offset, $extLength);
             $offset += $extLength;
-            
+
             $this->extensions[$type] = $extData;
-            
+
             // 解析QUIC传输参数
-            if ($type === 0x0039) {
+            if (0x0039 === $type) {
                 $this->transportParameters = TransportParameters::decode($extData);
             }
         }
@@ -170,11 +196,11 @@ class ServerHello
         // 生成x25519密钥对
         $privateKey = random_bytes(32);
         $publicKey = $this->generateX25519PublicKey($privateKey);
-        
-        $data = pack('n', 0x001d); // Named Group: x25519
+
+        $data = pack('n', 0x001D); // Named Group: x25519
         $data .= pack('n', strlen($publicKey)); // Key Exchange Length
         $data .= $publicKey;
-        
+
         return $data;
     }
 
@@ -218,7 +244,7 @@ class ServerHello
     {
         $this->cipherSuite = $suite;
     }
-    
+
     /**
      * 设置随机数
      */
@@ -226,9 +252,12 @@ class ServerHello
     {
         $this->random = $random;
     }
-    
+
     /**
      * 设置扩展
+     */
+    /**
+     * @param array<int, string> $extensions
      */
     public function setExtensions(array $extensions): void
     {

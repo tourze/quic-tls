@@ -9,11 +9,8 @@ namespace Tourze\QUIC\TLS\Message;
  */
 class Finished
 {
-    private string $verifyData;
-
-    public function __construct(string $verifyData = '')
+    public function __construct(private readonly string $verifyData = '')
     {
-        $this->verifyData = $verifyData;
     }
 
     /**
@@ -39,12 +36,4 @@ class Finished
     {
         return $this->verifyData;
     }
-
-    /**
-     * 设置验证数据
-     */
-    public function setVerifyData(string $verifyData): void
-    {
-        $this->verifyData = $verifyData;
-    }
-} 
+}

@@ -24,14 +24,15 @@ class TransportParameters
     public const PARAM_INITIAL_MAX_STREAM_DATA_UNI = 0x07;
     public const PARAM_INITIAL_MAX_STREAMS_BIDI = 0x08;
     public const PARAM_INITIAL_MAX_STREAMS_UNI = 0x09;
-    public const PARAM_ACK_DELAY_EXPONENT = 0x0a;
-    public const PARAM_MAX_ACK_DELAY = 0x0b;
-    public const PARAM_DISABLE_ACTIVE_MIGRATION = 0x0c;
-    public const PARAM_PREFERRED_ADDRESS = 0x0d;
-    public const PARAM_ACTIVE_CONNECTION_ID_LIMIT = 0x0e;
-    public const PARAM_INITIAL_SOURCE_CONNECTION_ID = 0x0f;
+    public const PARAM_ACK_DELAY_EXPONENT = 0x0A;
+    public const PARAM_MAX_ACK_DELAY = 0x0B;
+    public const PARAM_DISABLE_ACTIVE_MIGRATION = 0x0C;
+    public const PARAM_PREFERRED_ADDRESS = 0x0D;
+    public const PARAM_ACTIVE_CONNECTION_ID_LIMIT = 0x0E;
+    public const PARAM_INITIAL_SOURCE_CONNECTION_ID = 0x0F;
     public const PARAM_RETRY_SOURCE_CONNECTION_ID = 0x10;
 
+    /** @var array<int, mixed> */
     private array $parameters = [];
 
     /**
@@ -47,10 +48,13 @@ class TransportParameters
         self::PARAM_INITIAL_MAX_STREAMS_BIDI => 100,
         self::PARAM_INITIAL_MAX_STREAMS_UNI => 100,
         self::PARAM_ACK_DELAY_EXPONENT => 3,
-        self::PARAM_MAX_ACK_DELAY => 25000, // 25ms
+        self::PARAM_MAX_ACK_DELAY => 25, // 25ms
         self::PARAM_ACTIVE_CONNECTION_ID_LIMIT => 8,
     ];
 
+    /**
+     * @param array<int, mixed> $parameters
+     */
     public function __construct(array $parameters = [])
     {
         // 使用 + 运算符合并参数，然后覆盖提供的参数
@@ -66,10 +70,10 @@ class TransportParameters
     public function encode(): string
     {
         $data = '';
-        
+
         foreach ($this->parameters as $id => $value) {
             $data .= $this->encodeVarInt($id);
-            
+
             if (is_string($value)) {
                 // 字符串值（如连接ID）
                 $data .= $this->encodeVarInt(strlen($value));
@@ -81,7 +85,7 @@ class TransportParameters
                 $data .= $encoded;
             }
         }
-        
+
         return $data;
     }
 
@@ -93,34 +97,39 @@ class TransportParameters
         $parameters = [];
         $offset = 0;
         $length = strlen($data);
-        
+
         while ($offset < $length) {
-            $id = self::decodeVarInt($data, $offset);
-            $valueLength = self::decodeVarInt($data, $offset);
-            
+            $idResult = self::decodeVarInt($data, $offset);
+            $id = $idResult['value'];
+            $offset = $idResult['offset'];
+
+            $valueLengthResult = self::decodeVarInt($data, $offset);
+            $valueLength = $valueLengthResult['value'];
+            $offset = $valueLengthResult['offset'];
+
             if ($offset + $valueLength > $length) {
                 throw new InvalidParameterException('传输参数数据不完整');
             }
-            
+
             $valueData = substr($data, $offset, $valueLength);
             $offset += $valueLength;
-            
+
             // 根据参数类型解析值
             if (in_array($id, [
                 self::PARAM_ORIGINAL_DESTINATION_CONNECTION_ID,
                 self::PARAM_STATELESS_RESET_TOKEN,
                 self::PARAM_INITIAL_SOURCE_CONNECTION_ID,
                 self::PARAM_RETRY_SOURCE_CONNECTION_ID,
-            ])) {
+            ], true)) {
                 // 字节串参数
                 $parameters[$id] = $valueData;
             } else {
                 // 整数参数
-                $valueOffset = 0;
-                $parameters[$id] = self::decodeVarInt($valueData, $valueOffset);
+                $valueResult = self::decodeVarInt($valueData, 0);
+                $parameters[$id] = $valueResult['value'];
             }
         }
-        
+
         return new self($parameters);
     }
 
@@ -130,8 +139,22 @@ class TransportParameters
     public function negotiate(self $peer): self
     {
         $negotiated = [];
-        
-        // 取两者的最小值作为协商结果
+
+        $negotiated = $this->negotiateMinimumParameters($peer, $negotiated);
+        $negotiated = $this->copyCommunicationParameters($peer, $negotiated);
+
+        return new self($negotiated);
+    }
+
+    /**
+     * 协商需要取最小值的参数
+     */
+    /**
+     * @param array<int, mixed> $negotiated
+     * @return array<int, mixed>
+     */
+    private function negotiateMinimumParameters(self $peer, array $negotiated): array
+    {
         $minParams = [
             self::PARAM_MAX_IDLE_TIMEOUT,
             self::PARAM_MAX_UDP_PAYLOAD_SIZE,
@@ -144,40 +167,65 @@ class TransportParameters
             self::PARAM_MAX_ACK_DELAY,
             self::PARAM_ACTIVE_CONNECTION_ID_LIMIT,
         ];
-        
+
         foreach ($minParams as $param) {
-            $localValue = $this->getParameter($param);
-            $peerValue = $peer->getParameter($param);
-            
-            if ($localValue !== null && $peerValue !== null) {
-                $negotiated[$param] = min($localValue, $peerValue);
-            } elseif ($localValue !== null) {
-                $negotiated[$param] = $localValue;
-            } elseif ($peerValue !== null) {
-                $negotiated[$param] = $peerValue;
-            }
+            $negotiated = $this->negotiateParameter($peer, $param, $negotiated);
         }
-        
-        // 复制不需要协商的参数
+
+        return $negotiated;
+    }
+
+    /**
+     * 协商单个参数
+     */
+    /**
+     * @param array<int, mixed> $negotiated
+     * @return array<int, mixed>
+     */
+    private function negotiateParameter(self $peer, int $param, array $negotiated): array
+    {
+        $localValue = $this->getParameter($param);
+        $peerValue = $peer->getParameter($param);
+
+        if (null !== $localValue && null !== $peerValue) {
+            $negotiated[$param] = min($localValue, $peerValue);
+        } elseif (null !== $localValue) {
+            $negotiated[$param] = $localValue;
+        } elseif (null !== $peerValue) {
+            $negotiated[$param] = $peerValue;
+        }
+
+        return $negotiated;
+    }
+
+    /**
+     * 复制不需要协商的参数
+     */
+    /**
+     * @param array<int, mixed> $negotiated
+     * @return array<int, mixed>
+     */
+    private function copyCommunicationParameters(self $peer, array $negotiated): array
+    {
         $copyParams = [
             self::PARAM_ACK_DELAY_EXPONENT,
             self::PARAM_DISABLE_ACTIVE_MIGRATION,
             self::PARAM_PREFERRED_ADDRESS,
         ];
-        
+
         foreach ($copyParams as $param) {
             if ($peer->hasParameter($param)) {
                 $negotiated[$param] = $peer->getParameter($param);
             }
         }
-        
-        return new self($negotiated);
+
+        return $negotiated;
     }
 
     /**
      * 设置参数
      */
-    public function setParameter(int $id, $value): void
+    public function setParameter(int $id, mixed $value): void
     {
         $this->parameters[$id] = $value;
     }
@@ -185,7 +233,7 @@ class TransportParameters
     /**
      * 获取参数
      */
-    public function getParameter(int $id)
+    public function getParameter(int $id): mixed
     {
         return $this->parameters[$id] ?? null;
     }
@@ -200,6 +248,9 @@ class TransportParameters
 
     /**
      * 获取所有参数
+     */
+    /**
+     * @return array<int, mixed>
      */
     public function getAllParameters(): array
     {
@@ -336,51 +387,54 @@ class TransportParameters
         if ($value < 0x40) {
             // 1 字节
             return chr($value);
-        } elseif ($value < 0x4000) {
+        }
+        if ($value < 0x4000) {
             // 2 字节
             return pack('n', 0x4000 | $value);
-        } elseif ($value < 0x40000000) {
+        }
+        if ($value < 0x40000000) {
             // 4 字节
             return pack('N', 0x80000000 | $value);
-        } else {
-            // 8 字节 - 使用更安全的方式处理大整数
-            if ($value >= 0x4000000000000000) {
-                throw new InvalidParameterException('值超出VarInt范围');
-            }
-            // 0xc000000000000000 = 13835058055282163712 (超过 PHP_INT_MAX)
-            // 需要分两步处理
-            $high = 0xc0000000;
-            $low = $value & 0xffffffff;
-            $highValue = ($value >> 32) & 0x3fffffff;
-            return pack('NN', $high | $highValue, $low);
         }
+        // 8 字节 - 使用更安全的方式处理大整数
+        if ($value >= 0x4000000000000000) {
+            throw new InvalidParameterException('值超出VarInt范围');
+        }
+        // 0xc000000000000000 = 13835058055282163712 (超过 PHP_INT_MAX)
+        // 需要分两步处理
+        $high = 0xC0000000;
+        $low = $value & 0xFFFFFFFF;
+        $highValue = ($value >> 32) & 0x3FFFFFFF;
+
+        return pack('NN', $high | $highValue, $low);
     }
 
     /**
      * 解码可变长度整数
+     * @return array{value: int, offset: int}
      */
-    private static function decodeVarInt(string $data, int &$offset): int
+    private static function decodeVarInt(string $data, int $offset): array
     {
         if ($offset >= strlen($data)) {
             throw new InvalidParameterException('数据不足以解码VarInt');
         }
-        
+
         $first = ord($data[$offset]);
         $length = 1 << ($first >> 6);
-        
+
         if ($offset + $length > strlen($data)) {
             throw new InvalidParameterException('VarInt数据不完整');
         }
-        
-        $value = $first & 0x3f;
-        
-        for ($i = 1; $i < $length; $i++) {
+
+        $value = $first & 0x3F;
+
+        for ($i = 1; $i < $length; ++$i) {
             $value = ($value << 8) | ord($data[$offset + $i]);
         }
-        
-        $offset += $length;
-        
-        return $value;
+
+        $newOffset = $offset + $length;
+
+        return ['value' => $value, 'offset' => $newOffset];
     }
 
     /**
@@ -390,43 +444,49 @@ class TransportParameters
     {
         // 检查必要参数的存在性和合理性
         $maxData = $this->getInitialMaxData();
-        if ($maxData > 0xffffffff) {
+        if ($maxData > 0xFFFFFFFF) {
             return false;
         }
-        
+
         $maxUdpPayload = $this->getMaxUdpPayloadSize();
         if ($maxUdpPayload < 1200 || $maxUdpPayload > 65527) {
             return false;
         }
-        
+
         $ackDelayExponent = $this->getParameter(self::PARAM_ACK_DELAY_EXPONENT);
-        if ($ackDelayExponent !== null && $ackDelayExponent > 20) {
+        if (null !== $ackDelayExponent && $ackDelayExponent > 20) {
             return false;
         }
-        
+
         $maxAckDelay = $this->getParameter(self::PARAM_MAX_ACK_DELAY);
-        if ($maxAckDelay !== null && $maxAckDelay >= 16384) {
+        if (null !== $maxAckDelay && $maxAckDelay >= 16384) {
             return false;
         }
-        
+
         return true;
     }
 
     /**
      * 转换为数组
      */
+    /**
+     * @return array<int, mixed>
+     */
     public function toArray(): array
     {
         return $this->parameters;
     }
-    
+
     /**
      * 从数组创建实例
+     */
+    /**
+     * @param array<string|int, mixed> $data
      */
     public static function fromArray(array $data): self
     {
         $instance = new self();
-        
+
         foreach ($data as $paramId => $value) {
             if (is_string($paramId)) {
                 // 如果 paramId 是字符串，尝试转换为对应的常量值
@@ -447,7 +507,7 @@ class TransportParameters
             }
             $instance->setParameter($paramId, $value);
         }
-        
+
         return $instance;
     }
-} 
+}
