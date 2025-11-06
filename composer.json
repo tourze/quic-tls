@@ -5,7 +5,7 @@
   "license": "MIT",
   "require": {
     "ext-openssl": "*",
-    "tourze/quic-core": "0.0.*",
+    "tourze/quic-core": "0.1.*",
     "tourze/quic-crypto": "0.0.*"
   },
   "require-dev": {
